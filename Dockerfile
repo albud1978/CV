@@ -19,7 +19,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ ./src/
 
 # Настройка PYTHONPATH
-ENV PYTHONPATH="${PYTHONPATH}:/app/src"
+# Используем явное определение, чтобы избежать предупреждений линтера об undefined variable
+ENV PYTHONPATH="/app/src"
 
 # Команда по умолчанию (можно переопределить в docker-compose)
 CMD ["python3"]

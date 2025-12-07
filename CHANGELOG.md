@@ -7,6 +7,10 @@
 ## [Unreleased]
 
 ### Добавлено
+- Обновлен `requirements.txt`: добавлена установка SAM 2 (git), Roboflow Inference, RF-DETR
+- Скрипт авторазметки данных `src/utils/auto_label.py` (использует YOLOv8x/l)
+- Скрипт загрузки моделей `src/utils/download_models.py`
+- Обновлен `requirements.txt` (добавлены `ultralytics`, `roboflow`, `supervision`)
 - Обновлен `README.md` (инструкция по запуску через Docker)
 - Создана структура подкаталогов в `src/` (models, utils, configs, train, inference)
 - Добавлена Docker-среда (`Dockerfile`, `docker-compose.yml`) с поддержкой GPU

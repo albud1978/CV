@@ -7,9 +7,18 @@ Pillow>=10.0.0
 # ===========================================
 # Deep Learning
 # ===========================================
-torch>=2.0.0
-torchvision>=0.15.0
-ultralytics>=8.0.0  # YOLOv8
+# torch>=2.0.0      <-- Installed via Docker base image (pytorch/pytorch)
+# torchvision>=0.15.0 <-- Installed via Docker base image
+ultralytics>=8.3.0
+
+# SAM 2 (Official Meta Repo)
+git+https://github.com/facebookresearch/segment-anything-2.git
+
+# Roboflow / SAM 3 / RF-DETR
+roboflow>=1.1.0
+inference>=0.9.0
+supervision>=0.16.0
+rfdetr>=0.0.1         # New! RF-DETR by Roboflow
 
 # ===========================================
 # Data Processing
@@ -35,5 +44,3 @@ python-dotenv>=1.0.0
 # ===========================================
 jupyter>=1.0.0
 ipykernel>=6.0.0
-
-

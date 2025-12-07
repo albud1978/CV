@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  cv-dev:
+    build: .
+    container_name: cv_pipeline_dev
+    # Обеспечиваем доступ к GPU (требует NVIDIA Container Toolkit)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - .:/app
+      # Исключаем локальные venv/cache из контейнера, если они есть
+      - /app/__pycache__
+      # Монтируем данные из путей, указанных в .env
+      - ${CV_INPUT_PATH}:/app/input
+      - ${CV_OUTPUT_PATH}:/app/output
+    working_dir: /app
+    # Держим контейнер запущенным для разработки
+    command: tail -f /dev/null
+    shm_size: '8gb'  # Увеличиваем shared memory для PyTorch DataLoader
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+

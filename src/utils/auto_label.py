@@ -92,3 +92,4 @@ if __name__ == "__main__":
     
     auto_label(args.input, args.output, args.model, args.conf, classes=RELEVANT_CLASSES)
 
+

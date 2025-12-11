@@ -25,6 +25,9 @@ class TextSearch:
 
     def visualize(self, image_path: str, detections: sv.Detections, output_path: str = "search_result.jpg"):
         image = cv2.imread(image_path)
+        if image is None:
+            print(f"Error: Could not read image {image_path}")
+            return
         
         box_annotator = sv.BoxAnnotator()
         label_annotator = sv.LabelAnnotator()

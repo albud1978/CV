@@ -69,7 +69,11 @@ def run_sam2(image_path, prompt_type="box", prompt_data=None):
             point_labels=point_labels,
             multimask_output=False
         )
-        
+    
+    if masks is None:
+        print("Error: No valid prompt type provided (use 'box' or 'point') or prediction failed.")
+        return
+
     # Visualize
     # masks shape: (1, H, W)
     mask = masks[0]

@@ -6,6 +6,12 @@
 
 Стек технологий: **PyTorch**, **YOLOv8/v11** (Ultralytics), **SAM 2** (Meta), **RF-DETR** (Roboflow).
 
+## Архитектура
+Целевая архитектура проекта (Target Architecture) описана в документе:
+[Эталонная Архитектура Мультимодальной AI-системы](docs/REFERENCE_ARCHITECTURE.md).
+
+Она включает в себя связку RF-DETR, SAM 2, SigLIP и других SOTA-компонентов.
+
 ## Структура проекта
 
 ```

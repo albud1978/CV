@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime
+FROM pytorch/pytorch:2.2.0-cuda12.1-cudnn8-devel
 
 # Установка системных зависимостей для OpenCV и других библиотек
 # libgl1-mesa-glx и libglib2.0-0 обязательны для cv2

@@ -40,6 +40,9 @@ def run_dino_1_5(image_path, prompt, api_token):
     
     # Визуализация (простая)
     img = cv2.imread(image_path)
+    if img is None:
+        print(f"Error: Could not read image from {image_path}")
+        return
     for obj in result.objects:
         bbox = obj.bbox # [x, y, w, h] or similar? Need to check SDK docs.
         # Обычно API возвращает [x_min, y_min, x_max, y_max]

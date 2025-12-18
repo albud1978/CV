@@ -36,10 +36,15 @@ class Molmo2Inference:
     Обёртка для инференса модели Molmo 2.
     """
     
-    # Доступные модели
+    # Доступные модели Molmo 2 (декабрь 2025)
     MODELS = {
-        "7b": "allenai/Molmo-7B-D-0924",
-        "72b": "allenai/Molmo-72B-0924",
+        # Molmo 2 — новые модели
+        "4b": "allenai/Molmo2-4B",
+        "8b": "allenai/Molmo2-8B", 
+        "7b": "allenai/Molmo2-O-7B",
+        "video": "allenai/Molmo2-VideoPoint-4B",
+        # Molmo 1 — старые модели (для совместимости)
+        "molmo1-7b": "allenai/Molmo-7B-D-0924",
     }
     
     def __init__(
@@ -82,12 +87,26 @@ class Molmo2Inference:
         )
         
         # Загрузка модели
-        self.model = AutoModelForCausalLM.from_pretrained(
-            self.model_id,
-            trust_remote_code=trust_remote_code,
-            torch_dtype=torch_dtype,
-            device_map="auto"
-        )
+        print(f"Попытка загрузки через AutoModel (trust_remote_code=True)...")
+        try:
+            # Для Molmo 2 часто требуется AutoModel или специализированный класс
+            # если AutoModelForCausalLM не узнает кастомный конфиг.
+            self.model = AutoModelForCausalLM.from_pretrained(
+                self.model_id,
+                trust_remote_code=trust_remote_code,
+                torch_dtype=torch_dtype,
+                device_map="auto"
+            )
+        except Exception as e:
+            print(f"Предупреждение: AutoModelForCausalLM не сработал: {e}")
+            print("Попытка загрузки через базовый AutoModel...")
+            from transformers import AutoModel
+            self.model = AutoModel.from_pretrained(
+                self.model_id,
+                trust_remote_code=trust_remote_code,
+                torch_dtype=torch_dtype,
+                device_map="auto"
+            )
         
         print(f"✓ Модель загружена на {self.device}")
         
@@ -229,8 +248,9 @@ def main():
     parser.add_argument("--image", type=str, required=True, help="Путь к изображению")
     parser.add_argument("--prompt", type=str, default="Describe this image in detail.", 
                         help="Текстовый запрос")
-    parser.add_argument("--model", type=str, default="7b", choices=["7b", "72b"],
-                        help="Размер модели")
+    parser.add_argument("--model", type=str, default="4b", 
+                        choices=["4b", "8b", "7b", "video", "molmo1-7b"],
+                        help="Модель: 4b, 8b (Molmo2), 7b (Molmo2-O), video (VideoPoint)")
     parser.add_argument("--task", type=str, default="qa", 
                         choices=["qa", "describe", "point", "count", "ocr"],
                         help="Тип задачи")

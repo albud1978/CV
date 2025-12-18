@@ -29,6 +29,7 @@ rfdetr>=0.0.1         # New! RF-DETR by Roboflow
 transformers>=4.45.0
 accelerate>=0.34.0
 einops>=0.8.0
+tensorflow>=2.15.0      # Требуется для Molmo processor
 
 # ===========================================
 # Data Processing

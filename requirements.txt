@@ -24,6 +24,14 @@ rfdetr>=0.0.1         # New! RF-DETR by Roboflow
 # Компилируем из исходников для корректной работы CUDA-слоев
 # git+https://github.com/IDEA-Research/GroundingDINO.git
 
+# Molmo 2 / VLM (Vision Language Models)
+transformers>=4.46.0
+accelerate>=0.26.0
+einops
+bitsandbytes
+decord  # Для загрузки видео
+termcolor # Для красивого вывода
+
 # ===========================================
 # Data Processing
 # ===========================================

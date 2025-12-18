@@ -21,6 +21,10 @@
 - Исправлен потенциальный краш в `src/inference/sam2_demo.py` при отсутствии валидного промпта (проверка `masks is None`).
 - Добавлена проверка на валидность изображения в `src/inference/dino_1_5_api.py` (защита от `AttributeError` если `imread` вернет `None`).
 - Добавлена проверка на валидность изображения в `src/inference/text_search.py` (защита от `AttributeError` если `imread` вернет `None`).
+- Обновлен `requirements.txt`: добавлены зависимости для **Molmo 2** (`transformers`, `accelerate`, `einops`, `bitsandbytes`, `decord`).
+- Добавлен скрипт `src/inference/molmo_demo.py` для запуска инференса Molmo 2.
+- Обновлена архитектура `docs/REFERENCE_ARCHITECTURE.md`: добавлен раздел про **Molmo 2** (Video QA).
+
 
 
 

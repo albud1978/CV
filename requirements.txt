@@ -24,23 +24,15 @@ rfdetr>=0.0.1         # New! RF-DETR by Roboflow
 # Компилируем из исходников для корректной работы CUDA-слоев
 # git+https://github.com/IDEA-Research/GroundingDINO.git
 
-<<<<<<< HEAD
-# Molmo 2 / VLM (Vision Language Models)
+# Molmo 2 (Allen Institute for AI) — VLM для видео/изображений
+# Модели: allenai/Molmo-7B-D-0924, allenai/Molmo-72B-0924
 transformers>=4.46.0
-accelerate>=0.26.0
-einops
+accelerate>=0.34.0
+einops>=0.8.0
 bitsandbytes
 decord  # Для загрузки видео
 termcolor # Для красивого вывода
-tensorflow # Required by Molmo weights (unexpectedly, but needed)
-=======
-# Molmo 2 (Allen Institute for AI) — VLM для видео/изображений
-# Модели: allenai/Molmo-7B-D-0924, allenai/Molmo-72B-0924
-transformers>=4.45.0
-accelerate>=0.34.0
-einops>=0.8.0
 tensorflow>=2.15.0      # Требуется для Molmo processor
->>>>>>> 7d135406ac893704c97f4fb6a91a792e3b500557
 
 # ===========================================
 # Data Processing

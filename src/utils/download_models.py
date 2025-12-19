@@ -49,9 +49,28 @@ def download_models():
                 model = YOLO(sam_model)
                 print(f"✔ {sam_model} ready.")
         except Exception as e:
-             print(f"⚠ Could not download {sam_model} via standard YOLO interface. You might need manual download. Error: {e}")
+             print(f"⚠ Could not download {sam_model} via standard YOLO interface. Error: {e}")
 
-    print("\nModel setup complete. Weights are cached in standard location (usually ~/.config/Ultralytics or local dir).")
+    # 3. Molmo 2 (Transformers)
+    # We only pre-cache the processor and a small model (4B) to save space
+    molmo_models = [
+        "allenai/Molmo2-4B",
+    ]
+    try:
+        from transformers import AutoProcessor, AutoModelForCausalLM
+        for m_id in molmo_models:
+            print(f"Pre-caching Molmo 2 model: {m_id}...")
+            AutoProcessor.from_pretrained(m_id, trust_remote_code=True)
+            # Мы не скачиваем веса модели полностью здесь, чтобы не забивать диск сразу,
+            # но процессор скачается. Для полной загрузки:
+            # AutoModelForCausalLM.from_pretrained(m_id, trust_remote_code=True)
+            print(f"✔ {m_id} processor ready.")
+    except ImportError:
+        print("⚠ Transformers not installed, skipping Molmo pre-cache.")
+    except Exception as e:
+        print(f"⚠ Error pre-caching Molmo: {e}")
+
+    print("\nModel setup complete. Weights are cached in standard location.")
 
 if __name__ == "__main__":
     download_models()

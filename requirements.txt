@@ -31,6 +31,7 @@ einops
 bitsandbytes
 decord  # Для загрузки видео
 termcolor # Для красивого вывода
+tensorflow # Required by Molmo weights (unexpectedly, but needed)
 
 # ===========================================
 # Data Processing

@@ -25,11 +25,11 @@ rfdetr>=0.0.1         # New! RF-DETR by Roboflow
 # git+https://github.com/IDEA-Research/GroundingDINO.git
 
 # Molmo 2 (Allen Institute for AI) — VLM для видео/изображений
-# Модели: allenai/Molmo-7B-D-0924, allenai/Molmo-72B-0924
-transformers>=4.45.0
+transformers>=4.57.1
 accelerate>=0.34.0
 einops>=0.8.0
-tensorflow>=2.15.0      # Требуется для Molmo processor
+decord2>=0.6.0
+molmo_utils>=0.0.1
 
 # ===========================================
 # Data Processing
@@ -49,6 +49,9 @@ seaborn>=0.12.0
 tqdm>=4.65.0
 pyyaml>=6.0
 python-dotenv>=1.0.0
+
+# Ускорение и устойчивость скачивания больших файлов с HuggingFace
+hf_transfer>=0.1.9
 
 # ===========================================
 # Jupyter

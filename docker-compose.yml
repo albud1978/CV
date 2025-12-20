@@ -14,6 +14,8 @@ services:
       - .:/app
       # Исключаем локальные venv/cache из контейнера, если они есть
       - /app/__pycache__
+      # Персистентный кеш HuggingFace (переживает пересоздание контейнера)
+      - ./.hf:/app/.hf
       # Монтируем данные из путей, указанных в .env
       - ${CV_INPUT_PATH}:/app/input
       - ${CV_OUTPUT_PATH}:/app/output
@@ -21,7 +23,20 @@ services:
     # Держим контейнер запущенным для разработки
     command: tail -f /dev/null
     shm_size: '8gb'  # Увеличиваем shared memory для PyTorch DataLoader
+    # Запускаем под UID/GID хоста, чтобы кеш/файлы не создавались от root на хосте
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      # HuggingFace caches (внутри volume ./.hf)
+      - HF_HOME=/app/.hf
+      - TRANSFORMERS_CACHE=/app/.hf/transformers
+      - HF_HUB_CACHE=/app/.hf/hub
+      # Отключаем Xet (cas-bridge.xethub.hf.co), так как на больших файлах он таймаутится
+      - HF_HUB_DISABLE_XET=1
+      # Сеть может быть медленной/нестабильной — увеличиваем таймауты
+      - HF_HUB_DOWNLOAD_TIMEOUT=600
+      - HF_HUB_ETAG_TIMEOUT=60
+      # Ускоренный/более устойчивый downloader (требует pip install hf_transfer)
+      - HF_HUB_ENABLE_HF_TRANSFER=1
 

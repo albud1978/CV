@@ -24,11 +24,11 @@ from typing import Optional, List, Union
 
 # Проверка импортов
 try:
-    from transformers import AutoModelForCausalLM, AutoProcessor, GenerationConfig
+    from transformers import AutoProcessor, AutoModelForImageTextToText, GenerationConfig
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
-    print("Warning: transformers not installed. Run: pip install transformers>=4.45.0")
+    print("Warning: transformers not installed. Run: pip install transformers>=4.57.1")
 
 
 class Molmo2Inference:
@@ -87,26 +87,13 @@ class Molmo2Inference:
         )
         
         # Загрузка модели
-        print(f"Попытка загрузки через AutoModel (trust_remote_code=True)...")
-        try:
-            # Для Molmo 2 часто требуется AutoModel или специализированный класс
-            # если AutoModelForCausalLM не узнает кастомный конфиг.
-            self.model = AutoModelForCausalLM.from_pretrained(
-                self.model_id,
-                trust_remote_code=trust_remote_code,
-                torch_dtype=torch_dtype,
-                device_map="auto"
-            )
-        except Exception as e:
-            print(f"Предупреждение: AutoModelForCausalLM не сработал: {e}")
-            print("Попытка загрузки через базовый AutoModel...")
-            from transformers import AutoModel
-            self.model = AutoModel.from_pretrained(
-                self.model_id,
-                trust_remote_code=trust_remote_code,
-                torch_dtype=torch_dtype,
-                device_map="auto"
-            )
+        print(f"Попытка загрузки через AutoModelForImageTextToText (trust_remote_code=True)...")
+        self.model = AutoModelForImageTextToText.from_pretrained(
+            self.model_id,
+            trust_remote_code=trust_remote_code,
+            torch_dtype=torch_dtype,
+            device_map="auto"
+        )
         
         print(f"✓ Модель загружена на {self.device}")
         

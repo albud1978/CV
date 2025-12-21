@@ -4,7 +4,7 @@
 
 Проект по разработке моделей компьютерного зрения (Computer Vision) для задач гражданской авиации. Основные задачи включают детекцию спецтехники и персонала, контроль соблюдения регламентов и обеспечение безопасности на перроне.
 
-Стек технологий: **PyTorch**, **YOLOv8/v11** (Ultralytics), **SAM 2** (Meta), **RF-DETR** (Roboflow).
+Стек технологий: **PyTorch**, **YOLOv8/v11** (Ultralytics), **YOLO-World** (zero-shot), **SAM 2** (Meta), **RF-DETR** (Roboflow), **Molmo2-4B** (VLM).
 
 ## Архитектура
 Целевая архитектура проекта (Target Architecture) описана в документе:
@@ -79,8 +79,8 @@ docker-compose exec cv-dev nvidia-smi
 ```
 
 Этот скрипт загрузит:
-- **YOLOv8** (детекция, сегментация) — ~200 МБ
-- **SAM 2** (сегментация) — ~150 МБ  
+- **YOLOv8/11 + YOLO-World** (детекция, сегментация, zero-shot) — ~300 МБ
+- **SAM 2** (сегментация по точкам) — ~176 МБ  
 - **Molmo2-4B** (VLM для анализа изображений/видео) — ~19 ГБ
 
 > ⚠️ Для Molmo2-4B требуется стабильное интернет-соединение. При проблемах с HuggingFace используйте VPN.
@@ -97,10 +97,23 @@ docker-compose exec cv-dev python3 src/utils/auto_label.py --input /app/input --
 
 ## Работа с моделями
 
-*   **YOLOv8/11**: Используется через библиотеку `ultralytics`. Веса: `yolov8*.pt`.
-*   **SAM 2**: Установлен из официального репозитория Meta. Веса: `src/models/sam2*.pt`.
+*   **YOLOv8/11**: Используется через библиотеку `ultralytics`. Веса: `src/models/yolo/*.pt`.
+*   **YOLO-World**: Zero-shot детекция любых объектов по текстовому описанию. Веса: `yolov8l-worldv2.pt`.
+*   **SAM 2**: Сегментация по точкам/маскам. Веса: `src/models/sam2/*.pt`.
 *   **RF-DETR**: Установлен через `pip install rfdetr`.
 *   **Molmo2-4B**: Vision-Language модель от Allen AI для анализа изображений и видео. Веса: `src/models/Molmo2-4B/`.
+
+### Пример YOLO-World (zero-shot детекция касок)
+```bash
+docker-compose exec cv-dev python3 -c "
+from ultralytics import YOLO
+model = YOLO('yolov8l-worldv2.pt')
+model.set_classes(['person', 'helmet', 'hard hat'])
+results = model.predict('input/your_image.jpg', conf=0.2)
+results[0].save('output/result.jpg')
+print(f'Найдено: {len(results[0].boxes)} объектов')
+"
+```
 
 ### Пример использования Molmo2-4B
 ```bash

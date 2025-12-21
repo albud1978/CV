@@ -20,22 +20,26 @@ cd "$PROJECT_ROOT"
 # 1. YOLO модели (Ultralytics)
 # ============================================
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "📦 1/3: YOLO модели (~200 МБ)"
+echo "📦 1/3: YOLO модели (~220 МБ)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+mkdir -p src/models/yolo
 
 YOLO_MODELS=(
     "yolov8l.pt|https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8l.pt"
     "yolov8l-seg.pt|https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8l-seg.pt"
+    "yolo11l.pt|https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11l.pt"
+    "yolov8l-worldv2.pt|https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8l-worldv2.pt"
 )
 
 for entry in "${YOLO_MODELS[@]}"; do
     file="${entry%%|*}"
     url="${entry##*|}"
-    if [ -f "$file" ]; then
+    if [ -f "src/models/yolo/$file" ]; then
         echo "  ✓ $file уже существует"
     else
         echo "  → Загружаю $file..."
-        wget -q --show-progress -c "$url" -O "$file"
+        wget -q --show-progress -c "$url" -O "src/models/yolo/$file"
     fi
 done
 
@@ -44,23 +48,23 @@ done
 # ============================================
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "📦 2/3: SAM 2 модели (~150 МБ)"
+echo "📦 2/3: SAM 2 модели (~176 МБ)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-mkdir -p src/models
+mkdir -p src/models/sam2
 
 SAM_MODELS=(
-    "src/models/sam2.1_hiera_small.pt|https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_small.pt"
+    "sam2.1_hiera_small.pt|https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_small.pt"
 )
 
 for entry in "${SAM_MODELS[@]}"; do
     file="${entry%%|*}"
     url="${entry##*|}"
-    if [ -f "$file" ]; then
+    if [ -f "src/models/sam2/$file" ]; then
         echo "  ✓ $file уже существует"
     else
         echo "  → Загружаю $file..."
-        wget -q --show-progress -c "$url" -O "$file"
+        wget -q --show-progress -c "$url" -O "src/models/sam2/$file"
     fi
 done
 
@@ -129,12 +133,12 @@ echo "╔═══════════════════════�
 echo "║  ✅ Загрузка завершена!                ║"
 echo "╚════════════════════════════════════════╝"
 echo ""
-echo "Проверка моделей:"
-echo "  YOLO:   $(ls -1 *.pt 2>/dev/null | wc -l) файлов"
-echo "  SAM:    $(ls -1 src/models/sam*.pt 2>/dev/null | wc -l) файлов"
-echo "  Molmo2: $(ls -1 src/models/Molmo2-4B/*.safetensors 2>/dev/null | wc -l)/4 файлов"
+echo "Структура моделей:"
+echo "  src/models/"
+echo "  ├── yolo/      $(ls -1 src/models/yolo/*.pt 2>/dev/null | wc -l) файлов"
+echo "  ├── sam2/      $(ls -1 src/models/sam2/*.pt 2>/dev/null | wc -l) файлов"
+echo "  └── Molmo2-4B/ $(ls -1 src/models/Molmo2-4B/*.safetensors 2>/dev/null | wc -l)/4 файлов"
 echo ""
 echo "Запуск проекта:"
 echo "  docker compose up -d"
-echo "  docker compose exec cv-dev python3 src/inference/molmo2.py --help"
-
+echo "  docker compose exec cv-dev python3 -c \"from ultralytics import YOLO; print(YOLO('src/models/yolo/yolo11l.pt'))\""

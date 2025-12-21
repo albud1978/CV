@@ -70,6 +70,7 @@ src/models/*/*.safetensors
 src/models/*/tokenizer.json
 src/models/*/vocab.json
 src/models/*/merges.txt
+src/models/groundingdino/*.pth
 
 # ===========================================
 # Логи

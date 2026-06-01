@@ -28,8 +28,11 @@ Molmo 2) описан отдельно в `docs/REFERENCE_ARCHITECTURE.md`.
 
 ## Данные
 
-- Чтение исходников только из `input/`, запись результатов только в `output/`.
-- Данные и веса НЕ коммитить (см. `.gitignore`).
+- Чтение исходников только из `input/` (Nextcloud, ro).
+- **Рабочие кадры/промежуточные датасеты — в `data/` на WSL ext4** (надёжно и быстро).
+  В `output/` (Nextcloud) писать только ФИНАЛЬНЫЕ датасеты: drvfs теряет мелкие файлы
+  при массовой записи (проверено: 277/400 кадров доехали на Nextcloud).
+- Данные и веса НЕ коммитить (см. `.gitignore`: `data/`, `output/`).
 - Контракты данных обязательны: `task.yaml`, `ontology.yaml`, `frames_manifest.parquet`,
   `metrics.json`, `model_card.md` (шаблоны — в `configs/*.example.yaml`).
 

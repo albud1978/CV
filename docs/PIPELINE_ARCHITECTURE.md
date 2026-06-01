@@ -180,6 +180,16 @@ Roboflow MCP закрывает весь путь. Декомпозиция на
 2. Универсальный CLI `cv-pipeline new --classes "..." --videos ./input/`.
 3. Continuous data flywheel: новые видео → дельта-дообучение.
 
+## 9.1. Хранение артефактов (WSL vs Nextcloud)
+
+Под Docker Desktop/WSL запись множества мелких файлов в `output/` (Nextcloud, `/mnt/c`,
+drvfs + синхронизация) **теряет часть файлов** (проверено: доехало 277 из 400 кадров).
+Поэтому:
+
+- Рабочие кадры и промежуточные датасеты → `data/` (WSL ext4, через mount `/app`) — быстро и надёжно.
+- В `output/` (Nextcloud) синхронизируются только ФИНАЛЬНЫЕ артефакты (обученные веса, отчёты).
+- `.env` под Docker Desktop: `CV_INPUT_PATH=./input` (UNC-трансляция), `CV_OUTPUT_PATH=/mnt/c/.../Nextcloud/CV/output`.
+
 ## 10. Стандарты обучения (зафиксированы в `.cursor/rules/cv-pipeline.mdc`)
 
 - `imgsz=1280` для сцен с мелкими/удалёнными объектами.

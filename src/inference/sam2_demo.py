@@ -18,10 +18,10 @@ def download_sam2_weights(model_cfg, output_dir="src/models"):
     Заглушка или реальная загрузка. Веса SAM 2 нужно качать отдельно.
     URL зависит от конфига.
     """
-    # Large model
-    url = "https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_large.pt"
-    name = "sam2_hiera_large.pt"
-    dest = os.path.join(output_dir, name)
+    # Small model (используем уже скачанный)
+    name = "sam2.1_hiera_small.pt"
+    dest = os.path.join("src/models/sam2", name)
+    url = "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_small.pt"
     
     if not os.path.exists(dest):
         print(f"Downloading {name}...")

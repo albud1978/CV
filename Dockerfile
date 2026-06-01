@@ -15,6 +15,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# HuggingFace Hub может пытаться качать через Xet (cas-bridge.xethub.hf.co),
+# что на нестабильной сети часто приводит к таймаутам.
+# Удаляем hf-xet на уровне образа, чтобы принудительно использовать обычный CDN/LFS.
+RUN pip uninstall -y hf-xet || true
+
 # Копируем исходный код (для продакшн сборки, в dev перекрывается volume-ом)
 COPY src/ ./src/
 

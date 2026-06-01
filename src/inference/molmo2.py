@@ -12,7 +12,7 @@ Molmo 2 — Vision-Language Model для понимания изображени
 - OCR (чтение текста)
 
 Использование:
-    python src/inference/molmo2.py --image test.jpg --prompt "Опиши что на изображении" --quant 4bit
+    python src/inference/molmo2.py --image test.jpg --prompt "Опиши что на изображении"
 """
 
 import os
@@ -24,11 +24,11 @@ from typing import Optional, List, Union
 
 # Проверка импортов
 try:
-    from transformers import AutoModelForCausalLM, AutoProcessor, GenerationConfig
+    from transformers import AutoProcessor, AutoModelForImageTextToText, GenerationConfig
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
-    print("Warning: transformers not installed. Run: pip install transformers>=4.45.0")
+    print("Warning: transformers not installed. Run: pip install transformers>=4.57.1")
 
 
 class Molmo2Inference:
@@ -52,8 +52,7 @@ class Molmo2Inference:
         model_name: str = "7b",
         device: Optional[str] = None,
         torch_dtype: torch.dtype = torch.bfloat16,
-        trust_remote_code: bool = True,
-        quantization: str = "none"
+        trust_remote_code: bool = True
     ):
         """
         Инициализация модели Molmo 2.
@@ -63,7 +62,6 @@ class Molmo2Inference:
             device: Устройство ("cuda", "cpu", или None для автовыбора)
             torch_dtype: Тип данных (bfloat16 для экономии памяти)
             trust_remote_code: Доверять коду модели с HuggingFace
-            quantization: Режим квантования ("none", "8bit", "4bit")
         """
         if not TRANSFORMERS_AVAILABLE:
             raise ImportError("transformers library is required. Install with: pip install transformers>=4.45.0")
@@ -77,21 +75,9 @@ class Molmo2Inference:
         else:
             self.model_id = model_name  # Позволяет указать полный путь
             
-        print(f"Загрузка модели {self.model_id} (Quantization: {quantization})...")
+        print(f"Загрузка модели {self.model_id}...")
         print(f"Устройство: {self.device}, dtype: {torch_dtype}")
         
-        # Настройки квантования
-        quantization_config = None
-        if quantization == "8bit":
-            from transformers import BitsAndBytesConfig
-            quantization_config = BitsAndBytesConfig(load_in_8bit=True)
-        elif quantization == "4bit":
-            from transformers import BitsAndBytesConfig
-            quantization_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_compute_dtype=torch_dtype
-            )
-
         # Загрузка процессора (токенизатор + image processor)
         self.processor = AutoProcessor.from_pretrained(
             self.model_id,
@@ -100,32 +86,16 @@ class Molmo2Inference:
             device_map="auto"
         )
         
-        # Подготовка аргументов для загрузки модели
-        model_kwargs = {
-            "trust_remote_code": trust_remote_code,
-            "torch_dtype": torch_dtype,
-            "device_map": "auto"
-        }
-        if quantization_config:
-            model_kwargs["quantization_config"] = quantization_config
-
         # Загрузка модели
-        print(f"Попытка загрузки через AutoModelForCausalLM...")
-        try:
-            self.model = AutoModelForCausalLM.from_pretrained(
-                self.model_id,
-                **model_kwargs
-            )
-        except Exception as e:
-            print(f"Предупреждение: AutoModelForCausalLM не сработал: {e}")
-            print("Попытка загрузки через базовый AutoModel...")
-            from transformers import AutoModel
-            self.model = AutoModel.from_pretrained(
-                self.model_id,
-                **model_kwargs
-            )
+        print(f"Попытка загрузки через AutoModelForImageTextToText (trust_remote_code=True)...")
+        self.model = AutoModelForImageTextToText.from_pretrained(
+            self.model_id,
+            trust_remote_code=trust_remote_code,
+            torch_dtype=torch_dtype,
+            device_map="auto"
+        )
         
-        print(f"✓ Модель загружена")
+        print(f"✓ Модель загружена на {self.device}")
         
     def predict(
         self,
@@ -154,21 +124,14 @@ class Molmo2Inference:
         else:
             images = [Image.open(img) if isinstance(img, str) else img for img in images]
         
-        # Конвертация в RGB
-        images = [img.convert("RGB") if img.mode != "RGB" else img for img in images]
-        
         # Подготовка входных данных
         inputs = self.processor.process(
             images=images,
             text=prompt
         )
         
-        # Перенос на устройство (self.model.device используется как база, но при map="auto" тензоры раскиданы)
-        # При device_map="auto" обычно достаточно to(device) для inputs, если модель сама управляет.
-        # Но для inputs надо просто to(device) первого слоя или основного устройства.
-        # Безопаснее просто to("cuda") если мы на GPU.
-        target_device = "cuda" if torch.cuda.is_available() else "cpu"
-        inputs = {k: v.to(target_device).unsqueeze(0) for k, v in inputs.items()}
+        # Перенос на устройство
+        inputs = {k: v.to(self.model.device).unsqueeze(0) for k, v in inputs.items()}
         
         # Генерация
         with torch.no_grad():
@@ -280,9 +243,6 @@ def main():
                         help="Тип задачи")
     parser.add_argument("--object", type=str, default="person",
                         help="Объект для point/count задач")
-    parser.add_argument("--quant", type=str, default="none", 
-                        choices=["none", "8bit", "4bit"], 
-                        help="Режим квантования (экономия VRAM)")
     
     args = parser.parse_args()
     
@@ -292,7 +252,7 @@ def main():
         sys.exit(1)
     
     # Инициализация модели
-    model = Molmo2Inference(model_name=args.model, quantization=args.quant)
+    model = Molmo2Inference(model_name=args.model)
     
     # Выполнение задачи
     if args.task == "describe":
@@ -323,3 +283,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

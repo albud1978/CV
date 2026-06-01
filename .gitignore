@@ -1,8 +1,8 @@
 # ===========================================
 # Данные (симлинки на Nextcloud)
 # ===========================================
-input
-output
+input/
+output/
 
 # Рабочие артефакты на WSL-диске (кадры, промежуточные датасеты, превью).
 # Запись на WSL ext4 надёжнее, чем на Nextcloud (drvfs теряет мелкие файлы).
@@ -67,9 +67,16 @@ ENV/
 *.h5
 *.pkl
 *.joblib
+*.safetensors
 checkpoints/
 models/*.pth
 models/*.pt
+# Веса моделей (большие файлы, не коммитятся)
+src/models/*/*.safetensors
+src/models/*/tokenizer.json
+src/models/*/vocab.json
+src/models/*/merges.txt
+src/models/groundingdino/*.pth
 
 # ===========================================
 # Логи
@@ -86,6 +93,11 @@ runs/
 *.temp
 .cache/
 .pytest_cache/
+
+# ===========================================
+# HuggingFace / Transformers cache (не коммитим)
+# ===========================================
+.hf/
 
 # ===========================================
 # OS

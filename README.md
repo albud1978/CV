@@ -4,7 +4,7 @@
 
 Проект по разработке моделей компьютерного зрения (Computer Vision) для задач гражданской авиации. Основные задачи включают детекцию спецтехники и персонала, контроль соблюдения регламентов и обеспечение безопасности на перроне.
 
-Стек технологий: **PyTorch**, **YOLOv8/v11** (Ultralytics), **SAM 2** (Meta), **RF-DETR** (Roboflow).
+Стек технологий: **PyTorch**, **YOLOv8/v11** (Ultralytics), **YOLO-World** (zero-shot), **SAM 2** (Meta), **RF-DETR** (Roboflow), **Molmo2-4B** (VLM).
 
 ## Архитектура
 Целевая архитектура проекта (Target Architecture) описана в документе:
@@ -73,10 +73,18 @@ docker-compose exec cv-dev nvidia-smi
 *Вы должны увидеть вашу видеокарту (например, RTX 5080) и версию драйвера.*
 
 ### 4. Загрузка весов моделей
-Перед первым запуском скачайте веса моделей (YOLOv8/11, SAM 2) внутрь проекта:
+**Обязательный шаг!** Перед первым запуском скачайте веса всех моделей:
 ```bash
-docker-compose exec cv-dev python3 src/utils/download_models.py
+./scripts/download_models.sh
 ```
+
+Этот скрипт загрузит:
+- **YOLOv8/11 + YOLO-World** (детекция, сегментация, zero-shot) — ~300 МБ
+- **SAM 2** (сегментация по точкам) — ~176 МБ  
+- **Molmo2-4B** (VLM для анализа изображений/видео) — ~19 ГБ
+
+> ⚠️ Для Molmo2-4B требуется стабильное интернет-соединение. При проблемах с HuggingFace используйте VPN.
+
 Веса сохранятся в `src/models/` и будут доступны при следующих запусках.
 
 ### 5. Запуск скриптов
@@ -89,9 +97,51 @@ docker-compose exec cv-dev python3 src/utils/auto_label.py --input /app/input --
 
 ## Работа с моделями
 
-*   **YOLOv8/11**: Используется через библиотеку `ultralytics`. Веса: `src/models/yolov8*.pt`.
-*   **SAM 2**: Установлен из официального репозитория Meta. Используется для точной сегментации.
+*   **YOLOv8/11**: Используется через библиотеку `ultralytics`. Веса: `src/models/yolo/*.pt`.
+*   **YOLO-World**: Zero-shot детекция любых объектов по текстовому описанию. Веса: `yolov8l-worldv2.pt`.
+*   **SAM 2**: Сегментация по точкам/маскам. Веса: `src/models/sam2/*.pt`.
 *   **RF-DETR**: Установлен через `pip install rfdetr`.
+*   **Molmo2-4B**: Vision-Language модель от Allen AI для анализа изображений и видео. Веса: `src/models/Molmo2-4B/`.
+
+### Пример YOLO-World (zero-shot детекция касок)
+```bash
+docker-compose exec cv-dev python3 -c "
+from ultralytics import YOLO
+model = YOLO('yolov8l-worldv2.pt')
+model.set_classes(['person', 'helmet', 'hard hat'])
+results = model.predict('input/your_image.jpg', conf=0.2)
+results[0].save('output/result.jpg')
+print(f'Найдено: {len(results[0].boxes)} объектов')
+"
+```
+
+### Пример использования Molmo2-4B
+```bash
+docker-compose exec cv-dev python3 -c "
+from transformers import AutoProcessor, AutoModelForImageTextToText
+import torch
+
+processor = AutoProcessor.from_pretrained('/app/src/models/Molmo2-4B', trust_remote_code=True)
+model = AutoModelForImageTextToText.from_pretrained(
+    '/app/src/models/Molmo2-4B',
+    trust_remote_code=True,
+    torch_dtype=torch.bfloat16,
+    device_map='auto'
+)
+
+messages = [{'role': 'user', 'content': [
+    {'type': 'text', 'text': 'Describe this image.'},
+    {'type': 'image', 'image': '/app/input/your_image.jpg'},
+]}]
+inputs = processor.apply_chat_template(messages, tokenize=True, return_tensors='pt', return_dict=True)
+inputs = {k: v.to(model.device) for k, v in inputs.items()}
+
+with torch.inference_mode():
+    output = model.generate(**inputs, max_new_tokens=200)
+
+print(processor.tokenizer.decode(output[0], skip_special_tokens=True))
+"
+```
 
 ## Решение проблем
 

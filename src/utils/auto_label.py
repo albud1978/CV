@@ -52,7 +52,7 @@ def save_yolo_label(file_path, detections, img_width, img_height, class_map=None
 def auto_label(
     input_dir: str, 
     output_dir: str, 
-    model_path: str = "src/models/yolov8x.pt", 
+    model_path: str = "src/models/yolo/yolov8l.pt", 
     model_type: str = "yolo", # "yolo" or "rf-detr"
     conf_threshold: float = 0.4,
     classes: list = None
@@ -150,7 +150,7 @@ if __name__ == "__main__":
     parser.add_argument("--input", type=str, default="/app/input", help="Input directory")
     parser.add_argument("--output", type=str, default="/app/output/auto_labels", help="Output directory")
     parser.add_argument("--type", type=str, default="yolo", choices=["yolo", "rf-detr"], help="Model type")
-    parser.add_argument("--model", type=str, default="src/models/yolov8l.pt", help="Path to YOLO model or size hint for RF-DETR (e.g. 'rf-detr-l')")
+    parser.add_argument("--model", type=str, default="src/models/yolo/yolov8l.pt", help="Path to YOLO model or size hint for RF-DETR (e.g. 'rf-detr-l')")
     parser.add_argument("--conf", type=float, default=0.35, help="Confidence threshold")
     
     args = parser.parse_args()

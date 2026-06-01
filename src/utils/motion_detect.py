@@ -39,9 +39,10 @@ class MotionDetector:
     
     def __init__(
         self,
-        motion_threshold: float = 0.5,
+        motion_threshold: float = 0.3,
         min_duration: float = 1.0,
-        buffer_seconds: float = 1.0,
+        buffer_seconds: float = 60.0,
+        gap_threshold: float = 60.0,
         history: int = 500,
         var_threshold: int = 16,
         detect_shadows: bool = False
@@ -52,7 +53,8 @@ class MotionDetector:
         Args:
             motion_threshold: Порог движения (0-100, % площади кадра с движением)
             min_duration: Минимальная длительность сегмента (секунды)
-            buffer_seconds: Буфер до/после движения (секунды)
+            buffer_seconds: Буфер после прекращения движения (секунды)
+            gap_threshold: Максимальный разрыв для объединения сегментов (секунды)
             history: Количество кадров для обучения фона
             var_threshold: Порог вариации для MOG2
             detect_shadows: Детектировать тени (замедляет работу)
@@ -60,16 +62,21 @@ class MotionDetector:
         self.motion_threshold = motion_threshold
         self.min_duration = min_duration
         self.buffer_seconds = buffer_seconds
+        self.gap_threshold = gap_threshold
         self.history = history
         self.var_threshold = var_threshold
         self.detect_shadows = detect_shadows
         
-    def analyze_video(self, video_path: str) -> Tuple[List[MotionSegment], dict]:
+    def analyze_video(
+        self, video_path: str, max_frame: int | None = None
+    ) -> Tuple[List[MotionSegment], dict]:
         """
         Анализ видео на наличие движения.
         
         Args:
             video_path: Путь к видеофайлу
+            max_frame: Если задан — декодируем только первые max_frame кадров
+                (ускоряет анализ и обходит битые GOP в хвосте файла).
             
         Returns:
             Tuple[List[MotionSegment], dict]: Список сегментов с движением и метаданные
@@ -100,16 +107,28 @@ class MotionDetector:
             detectShadows=self.detect_shadows
         )
         
+        # Ограничение анализа (окно присутствия / обход битого хвоста)
+        limit = total_frames if not max_frame else min(total_frames, max_frame)
+
         # Анализ кадров
         motion_frames = []  # (frame_idx, motion_percent)
         
         frame_idx = 0
-        pbar = tqdm(total=total_frames, desc="Анализ движения", unit="кадр")
+        fail_streak = 0
+        pbar = tqdm(total=limit, desc="Анализ движения", unit="кадр")
         
-        while True:
+        while frame_idx < limit:
             ret, frame = cap.read()
             if not ret:
-                break
+                # Один сбой декодирования (битый кадр) не должен ронять весь анализ:
+                # пропускаем до 30 подряд, дальше считаем, что поток закончился.
+                fail_streak += 1
+                if fail_streak > 30:
+                    break
+                frame_idx += 1
+                pbar.update(1)
+                continue
+            fail_streak = 0
             
             # Применяем background subtraction
             fg_mask = bg_subtractor.apply(frame)
@@ -202,8 +221,11 @@ class MotionDetector:
         self, 
         segments: List[MotionSegment], 
         fps: float,
-        gap_threshold: float = 30.0  # секунды — объединяем если пауза меньше 30 сек
+        gap_threshold: float = None  # секунды — объединяем если пауза меньше этого значения
     ) -> List[MotionSegment]:
+        # Используем значение из конструктора, если не передано явно
+        if gap_threshold is None:
+            gap_threshold = getattr(self, 'gap_threshold', 60.0)
         """
         Объединяет близко расположенные сегменты.
         """
@@ -267,9 +289,10 @@ class MotionDetector:
 def process_videos(
     input_path_str: str,
     output_dir: str,
-    motion_threshold: float = 0.5,
+    motion_threshold: float = 0.3,
     min_duration: float = 1.0,
-    buffer_seconds: float = 1.0
+    buffer_seconds: float = 60.0,
+    gap_threshold: float = 60.0
 ):
     """
     Обрабатывает одно видео или все видео в директории.
@@ -302,13 +325,15 @@ def process_videos(
     print(f"Найдено {len(video_files)} видео")
     print(f"Порог движения: {motion_threshold}%")
     print(f"Мин. длительность: {min_duration}с")
-    print(f"Буфер: {buffer_seconds}с")
+    print(f"Буфер после движения: {buffer_seconds}с")
+    print(f"Объединение сегментов (gap): {gap_threshold}с")
     print("-" * 50)
     
     detector = MotionDetector(
         motion_threshold=motion_threshold,
         min_duration=min_duration,
-        buffer_seconds=buffer_seconds
+        buffer_seconds=buffer_seconds,
+        gap_threshold=gap_threshold
     )
     
     total_segments = 0
@@ -367,8 +392,8 @@ def main():
     parser.add_argument(
         "--threshold", "-t",
         type=float,
-        default=0.5,
-        help="Порог движения в %% площади кадра (default: 0.5)"
+        default=0.3,
+        help="Порог движения в %% площади кадра (default: 0.3)"
     )
     parser.add_argument(
         "--min-duration", "-m",
@@ -382,15 +407,22 @@ def main():
         default=60.0,
         help="Буфер после прекращения движения в секундах (default: 60.0)"
     )
+    parser.add_argument(
+        "--gap", "-g",
+        type=float,
+        default=60.0,
+        help="Макс. разрыв для объединения сегментов в секундах (default: 60.0)"
+    )
     
     args = parser.parse_args()
     
     process_videos(
-        input_dir=args.input,
+        input_path_str=args.input,
         output_dir=args.output,
         motion_threshold=args.threshold,
         min_duration=args.min_duration,
-        buffer_seconds=args.buffer
+        buffer_seconds=args.buffer,
+        gap_threshold=args.gap
     )
 
 

@@ -1,0 +1,154 @@
+# Онтология: детекция наземного обогревателя (АПК/кондиционер) ВС и события
+# подключения/отключения широкого гофрошланга к самолёту.
+#
+# Постановка (уточнено заказчиком):
+#   - Интересует НЕ сам юнит, а ФАКТ подключения широкого гофрошланга к ВС.
+#   - heater = будка/тележка на колёсах (unit) + ШИРОКИЙ гофрошланг (wide_hose),
+#     подключённый к самолёту. Без шланга юнит не интересен.
+#   - Наземный источник питания (GPU) выглядит так же, как обогреватель, НО от него
+#     идёт ТОНКИЙ кабель, а не широкий шланг -> служит для отстройки (negative).
+#   - Цель трекинга: момент CONNECTED <-> DISCONNECTED шланга относительно ВС.
+#
+# ТИП ПРОЕКТА: instance-segmentation (маски, а не bbox).
+#   Причина: гибкий шланг изогнут по диагонали -> bbox покрывает огромную пустую
+#   область и перекрывает всё; маска ложится по форме. Толщину шланга по МАСКЕ
+#   (area/perimeter) мерить надёжно -> отстройка широкого гофрошланга от тонкого
+#   кабеля. SAM 3 и так выдаёт маски (model_options.outputFormat=polygon). Bbox при
+#   необходимости выводится из маски.
+#
+# ВАЖНО (эмпирика SAM 3 PCS через Roboflow Auto Label, июнь 2026):
+#   - SAM 3 крайне чувствителен к КОНКРЕТНОМУ слову (не к смыслу).
+#   - Несколько промптов для ОДНОГО объекта конкурируют -> NMS схлопывает всё в один
+#     класс. Промпты для РАЗНЫХ объектов (unit+hose+person) уживаются нормально.
+#   - SEG-режим (polygon): "hose" -> 1 ЧИСТАЯ маска/кадр на гофрошланге, БЕЗ вложенного
+#     перелова (в detection-режиме "hose" давал кашу из боксов). Это рабочий промпт.
+#   - SEG-режим: "generator" -> 0 (в detection давал 1/кадр) -> для unit нужен другой
+#     промпт, тестировать "cart"/"machine"/"vehicle"/"trailer".
+#   - "person" -> ловит и пассажиров (очередь у двери), не только наземный персонал.
+#   - "cable" -> монополизирует тонкие объекты (нельзя в одном проходе с hose).
+#   - Фразы ("wide flexible hose","thick corrugated hose","heater","air conditioning
+#     unit","machine on wheels","worker in safety vest") давали 0 — НЕ использовать.
+#   - Одинаковые кадры дедуплицируются Roboflow по контенту: повторный autolabel
+#     ПЕРЕЗАПИСЫВАЕТ аннотации общей записи. НЕ перезапускать autolabel на тех же
+#     кадрах (затрёт хорошие маски) — для серий/доразметки использовать уникальные кадры.
+
+# --- Атомарные классы, которые учит студент (RF-DETR) ---
+classes:
+  - class_id: 0
+    label: unit                      # будка/тележка на колёсах (heater ИЛИ GPU)
+    positive_prompts:
+      - "cart"                       # ТЕСТИРОВАТЬ в seg-режиме (generator дал 0 в seg)
+      - "machine"
+      - "vehicle"
+    negative_prompts:
+      - "aircraft engine"
+      - "whole airplane"
+    synonyms: ["ground unit", "wheeled cart", "booth", "generator(detection-only)"]
+    confidence: 0.20
+    status: "TODO: подобрать рабочий seg-промпт (generator работал только в detection)"
+    visual_rules: >
+      Компактный бокс/будка на колёсной тележке у ВС. Сам по себе НЕ определяет heater —
+      нужен признак широкого шланга рядом (см. derived.heater_complex).
+
+  - class_id: 1
+    label: wide_hose                 # ШИРОКИЙ гофрошланг обогревателя (ключевой позитив)
+    positive_prompts:
+      - "hose"                       # SEG-режим: 1 чистая маска/кадр, перелова нет
+    negative_prompts:
+      - "thin cable"
+      - "power cable"
+      - "narrow tube"
+    synonyms: ["heater duct", "wide flexible hose", "corrugated duct"]
+    confidence: 0.30
+    mask_thickness_filter:           # отделяет широкий шланг от кабелей ПО МАСКЕ
+      metric: "2*area/perimeter"     # средняя толщина полигона (px на 1280px-кадре)
+      min_thickness_px: 8            # реальный гофрошланг ~15px; тонкий кабель <6px
+    visual_rules: >
+      Толстый гофрированный рукав от юнита к брюху ВС. НЕ размечать тонкие кабели,
+      провода и шланги малого диаметра.
+
+  - class_id: 2
+    label: cable                     # тонкий кабель — дискриминатор GPU (опционально)
+    positive_prompts:
+      - "cable"
+    confidence: 0.20
+    visual_rules: >
+      Тонкий кабель от наземного источника питания. Используется как НЕГАТИВ:
+      unit + cable (без wide_hose) => это GPU, НЕ heater. Размечать отдельным проходом.
+
+  # Персонал и пассажиры разводятся ОФЛАЙН по цвету жилета (см. person_split).
+  # SAM 3 даёт класс "person", промпт со "vest" не работает (0 срабатываний).
+  - class_id: 3
+    label: staff                     # наземный персонал в светоотражающем жилете
+    derived_from: person
+    rule: "доля hi-vis пикселей в маске >= vest_fraction_threshold"
+    visual_rules: "Наземный персонал у техники/ВС в жилете (lime/жёлто-зелёный)."
+
+  - class_id: 4
+    label: passenger                 # пассажир без жилета (посадка/высадка)
+    derived_from: person
+    rule: "person без признака жилета (hi-vis доля < порога)"
+    visual_rules: "Пассажиры у двери/трапа без спецжилета. Важны для события посадки/высадки."
+
+# --- Разделение person -> staff/passenger по цвету жилета (офлайн) ---
+person_split:
+  method: hi_vis_vest_color
+  # HSV (OpenCV: H 0-179, S/V 0-255). Несколько диапазонов под разные цвета жилетов.
+  # Точные цвета заказчик уточнит позже -> правим только этот список.
+  hsv_ranges:
+    - { lower: [28, 60, 80],  upper: [75, 255, 255] }   # лайм / жёлто-зелёный
+    - { lower: [10, 90, 110], upper: [27, 255, 255] }   # оранжевый
+  vest_fraction_threshold: 0.06      # доля hi-vis пикселей в маске -> staff
+  note: "Пассажиры без жилета -> доля ~0 -> passenger. Порог/цвета подбираются по QA."
+
+# --- Производные сущности и события (вычисляются логикой, НЕ учатся напрямую) ---
+derived:
+  heater_complex:
+    rule: "unit AND wide_hose в пределах proximity_px друг от друга"
+    proximity_px: 250
+    note: "unit + thin cable (без wide_hose) => GPU, исключить."
+
+  connection_state:
+    connected_rule: >
+      Один конец wide_hose перекрывается/касается зоны брюха ВС
+      (IoU c aircraft_belly_region > 0 или расстояние конца шланга до фюзеляжа < gap_px).
+    gap_px: 60
+    states: ["connected", "disconnected"]
+
+events:
+  hold_seconds: 3.0                  # антидребезг (не реагировать на одиночные кадры)
+  min_passengers: 3                  # порог для события посадки/высадки
+  # то, что в итоге отдаём: тайм-коды переходов состояния
+  transitions:
+    - name: hose_connected
+      trigger: "disconnected -> connected, удержано >= hold_seconds"
+    - name: hose_disconnected
+      trigger: "connected -> disconnected, удержано >= hold_seconds"
+    - name: boarding_or_deboarding
+      trigger: ">= min_passengers пассажиров у двери ВС, удержано >= hold_seconds"
+
+# --- Стратегия авто-разметки учителем (SAM 3) с учётом эмпирики ---
+autolabel:
+  teacher: roboflow-autolabel        # SAM 3 (foundational)
+  project_type: instance-segmentation
+  model_options: { outputFormat: polygon }
+  # КАЖДЫЙ КЛАСС — ОТДЕЛЬНЫЙ ПРОХОД (одноклассовый), затем слияние масок офлайн.
+  # Причина: в многопромптовом проходе SAM 3 при касании объектов (человек у шланга
+  # в момент подключения) сливает маски / путает класс / подавляет одну из масок.
+  # Один концепт на проход = нет межклассовой конкуренции.
+  # Roboflow дедуплицирует кадры и ПЕРЕЗАПИСЫВАЕТ аннотации -> проходы делаем
+  # последовательно с ВЫГРУЗКОЙ результата после каждого (см. src/pipeline/autolabel_rf.py).
+  passes:
+    - { name: hose,   ontology: { hose: "hose" },   confidence: 0.30 }
+    - { name: person, ontology: { person: "person" }, confidence: 0.30 }  # -> staff/passenger офлайн
+    - { name: unit,   ontology: { unit: "cart" },   confidence: 0.20 }    # TODO подобрать seg-промпт
+    - { name: cable,  ontology: { cable: "cable" }, confidence: 0.20 }    # дискриминатор GPU
+  iou_nms: 0.5
+  human_gate: G1                     # человек чистит маски перед обучением
+
+# Текущий рабочий проект-датасет: ban-nzbro/gse-heater-seg (48 кадров видео 01,
+# annotation job CKvD7SKY95M0znzITCwC: 125 масок hose+person, unit ещё не размечен).
+
+defaults:
+  iou_nms: 0.5
+  max_detections_per_image: 100

@@ -144,6 +144,7 @@ def sample_motion_segments(
     min_duration: float = 1.0,
     buffer_seconds: float = 3.0,
     gap_threshold: float = 5.0,
+    max_frame: int | None = None,
 ) -> list[FrameCandidate]:
     """Находит интервалы движения (MOG2) и сэмплирует кадры внутри них.
 
@@ -164,7 +165,7 @@ def sample_motion_segments(
         buffer_seconds=buffer_seconds,
         gap_threshold=gap_threshold,
     )
-    segments, meta = detector.analyze_video(video_path)
+    segments, meta = detector.analyze_video(video_path, max_frame=max_frame)
     fps = meta["fps"] or 25.0
     step = max(1, int(round(fps / motion_fps)))
 

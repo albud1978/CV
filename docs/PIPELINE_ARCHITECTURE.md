@@ -38,11 +38,13 @@
 ВХОД:  task.yaml  +  ontology.yaml  +  ./input/<videos>
    |
    v
-СЛОЙ 1 — INGEST                                  src/pipeline/ingest.py
-   ffmpeg normalize -> PySceneDetect (Adaptive) -> pHash dedup
-   -> frames_manifest.parquet (video_id, scene_id, ts, hash, split)
+СЛОЙ 1 — INGEST                  src/pipeline/ingest.py + build_dataset.py
+   MOG2 motion (окно присутствия) + initial-сцена -> pHash dedup
+   build_dataset.py: split по ВИДЕО из configs/dataset_split.yaml,
+     позитивы внутри positive_window_sec + негативы вне, штамп split/video_id
+   -> frames_manifest.(parquet|jsonl) (video_id, source, ts, hash, split)
    -> upload в Roboflow (images_prepare_upload[_zip])
-   [Gate G0] манифест валиден, доля дублей <= 5%
+   [Gate G0] манифест валиден, доля дублей <= 5%, нет утечки между split
    |
    v
 СЛОЙ 2 — AUTO-LABEL (один учитель)               src/pipeline/label.py
@@ -194,7 +196,7 @@ drvfs + синхронизация) **теряет часть файлов** (п
 
 - `imgsz=1280` для сцен с мелкими/удалёнными объектами.
 - `close_mosaic=10`, `mixup=0`, `erasing=0`, `copy_paste=0`.
-- Split 70/20/10, **stratified by `video_id`** (не случайно по кадрам — иначе утечка).
+- Split по `video_id`, **не по кадрам** (иначе утечка near-duplicate кадров между train/test). Для статичных камер каждая локация/камера представлена в train, а в val/test вынесены отдельные съёмки тех же камер в новых условиях (ночь/дождь/вечер) — оценка обобщения под прод. Фактическое разбиение задачи heater (9 видео) — в `configs/dataset_split.yaml`: train=6, val=1, test=2.
 - Per-class confidence в Auto Label: редкие классы — 0.20, частые — 0.40.
 - SAHI только на инференсе (slice 512–832, overlap 0.2–0.25).
 

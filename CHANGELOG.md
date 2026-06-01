@@ -7,6 +7,7 @@
 ## [Unreleased]
 
 ### Добавлено
+- **СЛОЙ 2 Бейк-офф учителей** (`src/pipeline/teacher_bakeoff.py`): сравнение open-vocabulary моделей-учителей на наборе кадров через transformers (без тяжёлых сборок). Поддержаны Grounding DINO (Apache 2.0) и Florence-2 (MIT). Прогон на объекте «наземный кондиционер ВС» (видео 01): Grounding DINO — мультикласс (unit/person/hose) conf~0.43, шумит; Florence-2 — точный плотный бокс по объекту. Найдена и обойдена несовместимость Florence-2 с transformers 4.57 (greedy + use_cache=False).
 - **СЛОЙ 1 Ingest — motion-driven нарезка** (`src/pipeline/ingest.py`): переработан под статичные камеры наблюдения. Логика «начальная сцена (initial) + наборы по движению (motion via MOG2)»: переиспользует `MotionDetector`, сэмплирует кадры внутри событий движения с `motion_fps`, мягкий pHash-дедуп. Манифест расширен полями `source`, `event_id`, `motion_score`. Проверено на видео `01` (400 кадров, 13 событий движения, целевой объект — наземный кондиционер ВС — уверенно попадает в выборку).
 - Зависимости пайплайна в `requirements.txt`: `pyarrow`, `scenedetect[opencv]`, `imagehash`.
 

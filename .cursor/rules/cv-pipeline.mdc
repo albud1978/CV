@@ -1,0 +1,51 @@
+---
+description: Стандарты CV-конвейера авто-разметки и обучения (Roboflow MCP + Cursor)
+alwaysApply: true
+---
+
+# Стандарты CV-конвейера
+
+Полная архитектура: `docs/PIPELINE_ARCHITECTURE.md`. Контур инференса (RF-DETR → SAM 2 →
+Molmo 2) описан отдельно в `docs/REFERENCE_ARCHITECTURE.md`.
+
+## Обучение (фиксированные значения)
+
+- `imgsz=1280` для сцен с мелкими/удалёнными объектами (GSE-перрон).
+- `close_mosaic=10`; `mixup=0`, `erasing=0`, `copy_paste=0` (мелкие быстрые объекты).
+- Split **70/20/10 stratified by `video_id`** — НИКОГДА случайно по кадрам (утечка train/val).
+- SAHI только на инференсе (slice 512–832, overlap 0.2–0.25), не в обучении.
+- Per-class confidence в Auto Label: редкие классы 0.20, частые 0.40.
+- Baseline-конфиг YOLO: `configs/augment_conservative.yaml`. RF-DETR гиперпараметры не трогать.
+
+## Модели
+
+- Student по умолчанию: **RF-DETR-M**; baseline сравнения — YOLOv8-l; smoke — RF-DETR-N.
+- Учитель по умолчанию: **Roboflow Auto Label** (MCP `autolabel_start`); fallback — локальный
+  `autodistill-grounded-sam-2` (Florence-2 + SAM 2).
+- Лицензии: встраивать в продукт только Apache-2.0 / MIT / BSD-3. **GPL-учителей**
+  (YOLO-World) использовать нельзя как часть распространяемого продукта.
+- SAM 3 — только после факт-чека весов и Meta SAM License (см. `docs/PIPELINE_ARCHITECTURE.md`).
+
+## Данные
+
+- Чтение исходников только из `input/`, запись результатов только в `output/`.
+- Данные и веса НЕ коммитить (см. `.gitignore`).
+- Контракты данных обязательны: `task.yaml`, `ontology.yaml`, `frames_manifest.parquet`,
+  `metrics.json`, `model_card.md` (шаблоны — в `configs/*.example.yaml`).
+
+## Архитектура разработки
+
+- Для MVP **без мультиагента**: один основной агент + Roboflow MCP.
+- Background Agents Cursor только для: (1) долгого обучения, (2) A/B учителей на golden-set.
+- Roboflow MCP-инструменты по слоям — таблица в `docs/PIPELINE_ARCHITECTURE.md` §8.
+
+## Гейты
+
+- G0: манифест валиден, дублей ≤ 5%. G1: AP учителя на golden-set ≥ 0.70.
+  G2: ≥ 95% approved, нет класса с < 20 инстансами.
+
+## Процесс (из .cursorrules)
+
+- После каждой задачи: обновить `CHANGELOG.md` (раздел `[Unreleased]`) + атомарный коммит.
+- Коммиты на русском, формат `[тип]: описание` (feat/fix/docs/refactor/test/chore).
+- Python: PEP 8, type hints для публичных функций, docstrings (Google style), комментарии по-русски.

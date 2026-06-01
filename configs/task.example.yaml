@@ -1,0 +1,47 @@
+# Контракт постановки задачи для CV-конвейера.
+# Копировать в configs/task.yaml и заполнить под конкретную задачу.
+# Используется агентом и для воспроизводимого повторного запуска пайплайна.
+
+# Человекочитаемая цель проекта.
+goal: "Детекция наземной техники и персонала обслуживания ВС на перроне (GSE surveillance)"
+
+# Тип задачи. Поддерживается: object-detection | instance-segmentation
+task_type: object-detection
+
+# Имя проекта в Roboflow (создаётся, если отсутствует).
+roboflow_project: "gse-apron-detection"
+
+# Источник данных: видео или директория с видео (только чтение из input/).
+input:
+  videos:
+    - "input/Видео Рощино 23.04.25/04_Ст 1_камера 50 2025-04-15T06.52.01-7.08.15.mkv"
+  # Целевое число уникальных кадров после дедупликации (ориентир для ingest).
+  target_frames: 300
+
+# Классы задачи. Подробные промпты и правила — в ontology.yaml.
+classes:
+  - ground_crew_person
+  - fuel_truck
+  - baggage_cart
+
+# Цель деплоя: batch | cloud | edge. Для MVP — batch (инференс на видеофайлах).
+deployment_target: batch
+
+# Критерии приёмки модели (gate-пороги, см. PIPELINE_ARCHITECTURE.md).
+acceptance_metrics:
+  map50_min: 0.75          # порог перехода фаза 1 -> 2
+  per_class_ap_min: 0.5
+  # целевые значения фазы 2:
+  map50_target: 0.90
+  map5095_target: 0.65
+
+# Ограничения проекта.
+constraints:
+  licenses_allowed: ["Apache-2.0", "MIT", "BSD-3"]   # GPL-учителей не встраивать в продукт
+  send_data_to_cloud: true   # false -> только локальная авто-разметка (autodistill)
+
+# Модель-ученик (student).
+student:
+  primary: rf-detr-m
+  baseline: yolov8-l
+  smoke: rf-detr-n           # для быстрой сквозной проверки пайплайна

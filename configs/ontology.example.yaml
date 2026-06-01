@@ -1,0 +1,52 @@
+# Онтология классов: промпты для модели-учителя и правила разметки.
+# Копировать в configs/ontology.yaml.
+#
+# positive_prompts -> идут в текстовый промпт учителя (SAM/Florence/Grounding DINO).
+#   Используйте простые noun-phrases в ед./мн. числе без артиклей (так обучены PCS-учителя).
+# negative_prompts -> подсказки для review / фильтрации ложных срабатываний.
+# confidence       -> per-class порог в Auto Label (редкие классы ниже, частые выше).
+# label            -> итоговое имя класса в датасете (snake_case).
+
+classes:
+  - class_id: 0
+    label: ground_crew_person
+    positive_prompts:
+      - "ground crew person in high-visibility vest"
+      - "airport worker in safety vest"
+    negative_prompts:
+      - "passenger"
+      - "person on jet bridge far away"
+    synonyms: ["ground handler", "ramp agent"]
+    confidence: 0.30
+    visual_rules: >
+      Только наземный персонал в спецодежде/жилете рядом с ВС или техникой.
+      НЕ размечать пассажиров и людей на удалённом телетрапе.
+
+  - class_id: 1
+    label: fuel_truck
+    positive_prompts:
+      - "fuel truck"
+      - "aircraft refueling truck"
+    negative_prompts:
+      - "passenger bus"
+      - "catering truck"
+    synonyms: ["bowser", "refueler"]
+    confidence: 0.25
+    visual_rules: "Топливозаправщик с цистерной/шлангами. Отличать от кейтеринга и автобуса."
+
+  - class_id: 2
+    label: baggage_cart
+    positive_prompts:
+      - "baggage cart"
+      - "luggage trolley"
+    negative_prompts:
+      - "pushback tractor"
+    synonyms: ["dolly", "luggage cart"]
+    confidence: 0.40
+    visual_rules: "Багажная тележка/прицеп. Частый класс -> порог выше."
+
+# Глобальные настройки авто-разметки.
+defaults:
+  teacher: roboflow-autolabel        # roboflow-autolabel | grounded-sam-2
+  iou_nms: 0.5
+  max_detections_per_image: 100

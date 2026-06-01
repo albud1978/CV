@@ -7,6 +7,11 @@
 ## [Unreleased]
 
 ### Добавлено
+- **Архитектура CV-конвейера** (`docs/PIPELINE_ARCHITECTURE.md`): финальная 5-слойная архитектура авто-разметки и обучения (Ingest → Auto-Label → Human Review → Version+Train → Eval+Deploy) с гейтами G0/G1/G2, контрактами данных и картой инструментов Roboflow MCP по слоям. Решение по разработке — без мультиагента для MVP.
+- **Контракты данных** (`configs/`): `task.example.yaml`, `ontology.example.yaml`, `augment_conservative.yaml` — шаблоны постановки задачи, онтологии классов и консервативной политики аугментаций (imgsz=1280, close_mosaic=10, mixup/erasing=0).
+- **Правило проекта** (`.cursor/rules/cv-pipeline.mdc`): зафиксированы стандарты обучения, выбора моделей, лицензий и split (70/20/10 stratified by video_id).
+- **СЛОЙ 1 Ingest** (`src/pipeline/ingest.py`): извлечение кадров через PySceneDetect (AdaptiveDetector) + дедупликация по perceptual hash + генерация `frames_manifest`. Graceful fallback при отсутствии опциональных зависимостей.
+- **Roboflow MCP**: подключён в Cursor (`~/.cursor/mcp.json`, streamable HTTP `https://mcp.roboflow.com/mcp`) — даёт доступ агенту к инструментам Roboflow (проекты, датасеты, разметка, обучение, Workflows, Universe). Глобальная конфигурация MCP восстановлена из бэкапа.
 - **Детекция движения** (`src/utils/motion_detect.py`): автоматическая нарезка видео на клипы с движением
   - Background Subtraction (MOG2) для обнаружения движения
   - Настраиваемый буфер после прекращения движения (по умолчанию 60 сек)

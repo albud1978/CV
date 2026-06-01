@@ -1,21 +1,22 @@
-"""СЛОЙ 1 — Ingest: извлечение и дедупликация кадров из видео.
+"""СЛОЙ 1 — Ingest: автоматическая нарезка видео на кадры для обучения.
 
-Пайплайн кадра:
-    видео -> PySceneDetect (AdaptiveDetector) -> кадры-представители сцен
-          -> perceptual hash (pHash) дедупликация
-          -> сохранение кадров в output/ + frames_manifest.parquet
+Стратегия для статичных камер наблюдения (перрон):
+    1. Начальная сцена (initial): N кадров из первых секунд видео — фон/establishing,
+       полезны как negatives и для понимания пустой сцены.
+    2. Наборы по движению (motion): MOG2 (src/utils/motion_detect.py) находит интервалы
+       реальной активности; внутри каждого события кадры сэмплируются с motion_fps.
+    3. Дедупликация по perceptual hash (pHash) с мягким порогом — внутри набора убираем
+       почти идентичные кадры, но сохраняем разнообразие поз/ракурсов одного события.
+    4. Манифест frames_manifest.parquet фиксирует происхождение каждого кадра
+       (source, event_id, motion_score, timestamp) для воспроизводимости.
 
-Манифест фиксирует происхождение каждого кадра (video_id, scene_id, timestamp, hash,
-split-заготовка), что нужно для воспроизводимости и stratified-split по video_id.
-
-Зависимости (опциональные, ставятся отдельно):
-    scenedetect, imagehash, pandas, pyarrow
+Зависимости (опциональные): scenedetect, imagehash, pandas, pyarrow.
 
 Использование:
     python -m src.pipeline.ingest \\
-        --input "input/Видео Рощино 23.04.25/04_Ст 1_камера 50 2025-04-15T06.52.01-7.08.15.mkv" \\
-        --output output/frames/rwith_04 \\
-        --max-frames 300
+        --input "/app/input/Видео Рощино 23.04.25/01_Ст 1_камера 50 2025-04-14T05.57.01-7.07.01.mkv" \\
+        --output /app/output/frames/r01 \\
+        --mode motion --max-frames 400
 
 См. docs/PIPELINE_ARCHITECTURE.md, СЛОЙ 1.
 """
@@ -24,16 +25,24 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Optional
 
 import cv2
 
+# Импорт MotionDetector с подстраховкой пути (на случай запуска не через -m).
+try:
+    from src.utils.motion_detect import MotionDetector
+except ImportError:  # pragma: no cover
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from src.utils.motion_detect import MotionDetector
+
 # --- Опциональные зависимости: не валим импорт модуля, если их нет ---
 try:
     from scenedetect import open_video, SceneManager
-    from scenedetect.detectors import AdaptiveDetector, ContentDetector
+    from scenedetect.detectors import AdaptiveDetector
     _SCENEDETECT_AVAILABLE = True
 except ImportError:
     _SCENEDETECT_AVAILABLE = False
@@ -56,21 +65,36 @@ VIDEO_EXTENSIONS = {".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm"}
 
 
 @dataclass
+class FrameCandidate:
+    """Кадр-кандидат до сохранения и дедупликации."""
+
+    frame_idx: int
+    timestamp: float
+    source: str          # 'initial' | 'motion' | 'scene' | 'fps'
+    event_id: int        # id события движения (-1 для не-motion)
+    motion_score: float  # средний % движения в событии (0.0 для не-motion)
+
+
+@dataclass
 class FrameRecord:
-    """Запись о кадре в манифесте.
+    """Запись о сохранённом кадре в манифесте.
 
     Attributes:
         video_id: Идентификатор исходного видео (имя файла без расширения).
-        scene_id: Порядковый номер сцены в видео.
+        source: Источник кадра ('initial' | 'motion' | 'scene' | 'fps').
+        event_id: Id события движения (-1, если кадр не из motion-набора).
+        motion_score: Средний % движения в событии.
         frame_idx: Индекс кадра в исходном видео.
         timestamp: Временная метка кадра в секундах.
-        phash: Perceptual hash кадра (hex-строка) или None, если imagehash недоступен.
+        phash: Perceptual hash (hex) или None, если imagehash недоступен.
         image_path: Путь к сохранённому кадру.
-        split: Заготовка под train/val/test (заполняется на этапе версионирования).
+        split: Заготовка под train/val/test (заполняется на версионировании).
     """
 
     video_id: str
-    scene_id: int
+    source: str
+    event_id: int
+    motion_score: float
     frame_idx: int
     timestamp: float
     phash: Optional[str]
@@ -78,69 +102,91 @@ class FrameRecord:
     split: str = "unassigned"
 
 
-def _detect_scene_frames(video_path: str, min_scene_len: int = 15) -> list[tuple[int, float]]:
-    """Находит кадры-представители сцен через PySceneDetect.
-
-    Args:
-        video_path: Путь к видеофайлу.
-        min_scene_len: Минимальная длина сцены в кадрах.
-
-    Returns:
-        Список кортежей (frame_idx, timestamp_sec) — середина каждой сцены.
-        Если PySceneDetect недоступен, список пуст (вызывающий код использует fallback).
-    """
-    if not _SCENEDETECT_AVAILABLE:
-        return []
-
-    video = open_video(video_path)
-    scene_manager = SceneManager()
-    # AdaptiveDetector устойчив к плавному движению камеры (типично для перрона).
-    scene_manager.add_detector(AdaptiveDetector(min_scene_len=min_scene_len))
-    scene_manager.detect_scenes(video, show_progress=True)
-    scene_list = scene_manager.get_scene_list()
-
-    fps = video.frame_rate
-    representatives: list[tuple[int, float]] = []
-    for start, end in scene_list:
-        start_f = start.get_frames()
-        end_f = end.get_frames()
-        mid_f = (start_f + end_f) // 2
-        representatives.append((mid_f, mid_f / fps if fps else 0.0))
-    return representatives
-
-
-def _sample_fixed_fps(video_path: str, sample_fps: float = 1.0) -> list[tuple[int, float]]:
-    """Fallback-сэмплер: равномерная выборка кадров с заданным FPS.
-
-    Используется, если PySceneDetect не установлен.
-
-    Args:
-        video_path: Путь к видеофайлу.
-        sample_fps: Сколько кадров в секунду извлекать.
-
-    Returns:
-        Список кортежей (frame_idx, timestamp_sec).
-    """
+def _video_meta(video_path: str) -> tuple[float, int]:
+    """Возвращает (fps, total_frames) видео."""
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise ValueError(f"Не удалось открыть видео: {video_path}")
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     cap.release()
+    return fps, total
 
+
+def sample_initial_scene(
+    video_path: str, n_frames: int = 10, seconds: float = 30.0
+) -> list[FrameCandidate]:
+    """Равномерно сэмплирует кадры из начала видео (establishing-сцена).
+
+    Args:
+        video_path: Путь к видео.
+        n_frames: Сколько кадров взять из начала.
+        seconds: Длина начального окна в секундах.
+
+    Returns:
+        Список кандидатов с source='initial'.
+    """
+    fps, total = _video_meta(video_path)
+    window = min(int(seconds * fps), total)
+    if window <= 0 or n_frames <= 0:
+        return []
+    step = max(1, window // n_frames)
+    return [
+        FrameCandidate(idx, idx / fps, "initial", -1, 0.0)
+        for idx in range(0, window, step)
+    ][:n_frames]
+
+
+def sample_motion_segments(
+    video_path: str,
+    motion_fps: float = 2.0,
+    motion_threshold: float = 0.3,
+    min_duration: float = 1.0,
+    buffer_seconds: float = 3.0,
+    gap_threshold: float = 5.0,
+) -> list[FrameCandidate]:
+    """Находит интервалы движения (MOG2) и сэмплирует кадры внутри них.
+
+    Args:
+        video_path: Путь к видео.
+        motion_fps: Сколько кадров в секунду извлекать ВНУТРИ события движения.
+        motion_threshold: Порог движения (% площади кадра) для MOG2.
+        min_duration: Минимальная длительность события (сек).
+        buffer_seconds: Буфер после прекращения движения (сек).
+        gap_threshold: Слияние событий, если пауза между ними меньше (сек).
+
+    Returns:
+        Список кандидатов с source='motion', проставленными event_id и motion_score.
+    """
+    detector = MotionDetector(
+        motion_threshold=motion_threshold,
+        min_duration=min_duration,
+        buffer_seconds=buffer_seconds,
+        gap_threshold=gap_threshold,
+    )
+    segments, meta = detector.analyze_video(video_path)
+    fps = meta["fps"] or 25.0
+    step = max(1, int(round(fps / motion_fps)))
+
+    candidates: list[FrameCandidate] = []
+    for event_id, seg in enumerate(segments):
+        for idx in range(seg.start_frame, seg.end_frame + 1, step):
+            candidates.append(
+                FrameCandidate(idx, idx / fps, "motion", event_id, float(seg.avg_motion))
+            )
+    print(f"  Найдено событий движения: {len(segments)}, кадров-кандидатов: {len(candidates)}")
+    return candidates
+
+
+def _sample_fixed_fps(video_path: str, sample_fps: float = 1.0) -> list[FrameCandidate]:
+    """Fallback-сэмплер: равномерная выборка кадров с заданным FPS."""
+    fps, total = _video_meta(video_path)
     step = max(1, int(round(fps / sample_fps)))
-    return [(idx, idx / fps) for idx in range(0, total, step)]
+    return [FrameCandidate(idx, idx / fps, "fps", -1, 0.0) for idx in range(0, total, step)]
 
 
 def _compute_phash(frame_bgr) -> Optional[str]:
-    """Считает perceptual hash кадра.
-
-    Args:
-        frame_bgr: Кадр в формате BGR (OpenCV).
-
-    Returns:
-        Hex-строка pHash или None, если imagehash недоступен.
-    """
+    """Считает perceptual hash кадра (hex) или None, если imagehash недоступен."""
     if not _IMAGEHASH_AVAILABLE:
         return None
     rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
@@ -148,16 +194,7 @@ def _compute_phash(frame_bgr) -> Optional[str]:
 
 
 def _is_duplicate(phash_hex: str, seen: list[str], threshold: int) -> bool:
-    """Проверяет, является ли кадр near-duplicate по расстоянию Хэмминга.
-
-    Args:
-        phash_hex: pHash нового кадра.
-        seen: Список уже принятых pHash.
-        threshold: Максимальное расстояние Хэмминга для признания дубликатом.
-
-    Returns:
-        True, если найден достаточно похожий кадр.
-    """
+    """True, если кадр near-duplicate по расстоянию Хэмминга к уже принятым."""
     if not _IMAGEHASH_AVAILABLE:
         return False
     h = imagehash.hex_to_hash(phash_hex)
@@ -170,37 +207,55 @@ def _is_duplicate(phash_hex: str, seen: list[str], threshold: int) -> bool:
 def ingest_video(
     video_path: str,
     output_dir: str,
-    max_frames: int = 300,
-    phash_threshold: int = 6,
+    mode: str = "motion",
+    max_frames: int = 400,
+    phash_threshold: int = 3,
+    initial_frames: int = 10,
+    initial_seconds: float = 30.0,
+    motion_fps: float = 2.0,
+    motion_threshold: float = 0.3,
     sample_fps: float = 1.0,
-    min_scene_len: int = 15,
 ) -> list[FrameRecord]:
     """Извлекает и дедуплицирует кадры из одного видео.
 
     Args:
         video_path: Путь к видеофайлу.
-        output_dir: Директория для сохранения кадров и манифеста.
+        output_dir: Директория для кадров и манифеста.
+        mode: 'motion' (initial + motion, по умолчанию) | 'fps' (равномерно).
         max_frames: Верхний предел числа сохраняемых кадров.
-        phash_threshold: Порог Хэмминга для дедупликации (меньше -> строже).
-        sample_fps: FPS для fallback-сэмплера (если нет PySceneDetect).
-        min_scene_len: Минимальная длина сцены для AdaptiveDetector.
+        phash_threshold: Порог Хэмминга для дедупликации (меньше -> мягче, больше кадров).
+        initial_frames: Сколько кадров взять из начальной сцены.
+        initial_seconds: Длина начального окна (сек).
+        motion_fps: FPS сэмплинга внутри событий движения.
+        motion_threshold: Порог MOG2 (% площади кадра).
+        sample_fps: FPS для режима 'fps'.
 
     Returns:
         Список FrameRecord по сохранённым кадрам.
     """
-    video_path_obj = Path(video_path)
-    video_id = video_path_obj.stem
+    video_id = Path(video_path).stem
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    candidates = _detect_scene_frames(video_path, min_scene_len=min_scene_len)
-    if not candidates:
-        if _SCENEDETECT_AVAILABLE:
-            print("PySceneDetect не нашёл сцен — fallback на равномерный сэмплинг.")
-        else:
-            print("PySceneDetect не установлен — fallback на равномерный сэмплинг по FPS.")
+    # 1. Сбор кандидатов согласно режиму.
+    candidates: list[FrameCandidate] = []
+    if mode == "motion":
+        print("Начальная сцена (initial)...")
+        candidates += sample_initial_scene(video_path, initial_frames, initial_seconds)
+        print("Анализ движения (MOG2)...")
+        candidates += sample_motion_segments(
+            video_path, motion_fps=motion_fps, motion_threshold=motion_threshold
+        )
+        if len(candidates) <= initial_frames:
+            print("Движение не обнаружено — добавляю равномерный fps-сэмплинг как fallback.")
+            candidates += _sample_fixed_fps(video_path, sample_fps=sample_fps)
+    else:
         candidates = _sample_fixed_fps(video_path, sample_fps=sample_fps)
 
+    # Сортируем по индексу кадра для последовательного чтения.
+    candidates.sort(key=lambda c: c.frame_idx)
+
+    # 2. Чтение, дедуп, сохранение.
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise ValueError(f"Не удалось открыть видео: {video_path}")
@@ -208,11 +263,16 @@ def ingest_video(
     records: list[FrameRecord] = []
     seen_hashes: list[str] = []
     dup_count = 0
+    processed_idx = set()
 
-    for scene_id, (frame_idx, ts) in enumerate(candidates):
+    for cand in candidates:
         if len(records) >= max_frames:
             break
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+        if cand.frame_idx in processed_idx:
+            continue
+        processed_idx.add(cand.frame_idx)
+
+        cap.set(cv2.CAP_PROP_POS_FRAMES, cand.frame_idx)
         ret, frame = cap.read()
         if not ret or frame is None:
             continue
@@ -224,16 +284,18 @@ def ingest_video(
         if phash_hex is not None:
             seen_hashes.append(phash_hex)
 
-        image_name = f"{video_id}_f{frame_idx:08d}.jpg"
+        image_name = f"{video_id}_{cand.source}_f{cand.frame_idx:08d}.jpg"
         image_path = out / image_name
         cv2.imwrite(str(image_path), frame)
 
         records.append(
             FrameRecord(
                 video_id=video_id,
-                scene_id=scene_id,
-                frame_idx=frame_idx,
-                timestamp=round(ts, 3),
+                source=cand.source,
+                event_id=cand.event_id,
+                motion_score=round(cand.motion_score, 4),
+                frame_idx=cand.frame_idx,
+                timestamp=round(cand.timestamp, 3),
                 phash=phash_hex,
                 image_path=str(image_path),
             )
@@ -241,28 +303,17 @@ def ingest_video(
 
     cap.release()
 
-    total_candidates = len(candidates)
-    dup_ratio = dup_count / total_candidates if total_candidates else 0.0
+    n_initial = sum(1 for r in records if r.source == "initial")
+    n_motion = sum(1 for r in records if r.source == "motion")
     print(
-        f"[{video_id}] кандидатов: {total_candidates}, сохранено: {len(records)}, "
-        f"дублей отсеяно: {dup_count} ({dup_ratio:.1%})"
+        f"[{video_id}] сохранено: {len(records)} "
+        f"(initial={n_initial}, motion={n_motion}), дублей отсеяно: {dup_count}"
     )
-    if dup_ratio > 0.05 and _IMAGEHASH_AVAILABLE:
-        print("  Gate G0: доля дублей > 5% среди кандидатов — это нормально для статичной камеры.")
-
     return records
 
 
 def save_manifest(records: list[FrameRecord], output_dir: str) -> str:
-    """Сохраняет манифест кадров (parquet при наличии pandas, иначе JSONL).
-
-    Args:
-        records: Список записей о кадрах.
-        output_dir: Директория для манифеста.
-
-    Returns:
-        Путь к сохранённому файлу манифеста.
-    """
+    """Сохраняет манифест кадров (parquet при наличии pandas/pyarrow, иначе JSONL)."""
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     rows = [asdict(r) for r in records]
@@ -272,7 +323,7 @@ def save_manifest(records: list[FrameRecord], output_dir: str) -> str:
             path = out / "frames_manifest.parquet"
             pd.DataFrame(rows).to_parquet(path, index=False)
             return str(path)
-        except Exception as exc:  # pyarrow может отсутствовать
+        except Exception as exc:
             print(f"Parquet недоступен ({exc}); пишу JSONL.")
 
     path = out / "frames_manifest.jsonl"
@@ -285,22 +336,16 @@ def save_manifest(records: list[FrameRecord], output_dir: str) -> str:
 def process(
     input_path: str,
     output_dir: str,
-    max_frames: int = 300,
-    phash_threshold: int = 6,
+    mode: str = "motion",
+    max_frames: int = 400,
+    phash_threshold: int = 3,
+    initial_frames: int = 10,
+    initial_seconds: float = 30.0,
+    motion_fps: float = 2.0,
+    motion_threshold: float = 0.3,
     sample_fps: float = 1.0,
 ) -> str:
-    """Обрабатывает видеофайл или директорию с видео.
-
-    Args:
-        input_path: Путь к видеофайлу или директории.
-        output_dir: Директория для кадров и манифеста.
-        max_frames: Лимит кадров на ОДНО видео.
-        phash_threshold: Порог дедупликации.
-        sample_fps: FPS для fallback-сэмплера.
-
-    Returns:
-        Путь к сохранённому манифесту.
-    """
+    """Обрабатывает видеофайл или директорию с видео; возвращает путь к манифесту."""
     in_path = Path(input_path)
     if in_path.is_file():
         videos = [in_path] if in_path.suffix.lower() in VIDEO_EXTENSIONS else []
@@ -320,8 +365,13 @@ def process(
             ingest_video(
                 str(video),
                 output_dir,
+                mode=mode,
                 max_frames=max_frames,
                 phash_threshold=phash_threshold,
+                initial_frames=initial_frames,
+                initial_seconds=initial_seconds,
+                motion_fps=motion_fps,
+                motion_threshold=motion_threshold,
                 sample_fps=sample_fps,
             )
         )
@@ -334,33 +384,41 @@ def process(
 def main() -> None:
     """CLI-точка входа для СЛОЯ 1 (ingest)."""
     parser = argparse.ArgumentParser(
-        description="Ingest: извлечение и дедупликация кадров из видео (СЛОЙ 1)."
+        description="Ingest: нарезка видео на кадры (начальная сцена + движение)."
     )
     parser.add_argument("--input", "-i", required=True, help="Видеофайл или директория с видео")
     parser.add_argument("--output", "-o", required=True, help="Директория для кадров и манифеста")
-    parser.add_argument("--max-frames", "-n", type=int, default=300, help="Лимит кадров на видео")
     parser.add_argument(
-        "--phash-threshold", "-p", type=int, default=6,
-        help="Порог Хэмминга для дедупликации (меньше -> строже)"
+        "--mode", choices=["motion", "fps"], default="motion",
+        help="motion = начальная сцена + наборы по движению (default); fps = равномерно"
     )
+    parser.add_argument("--max-frames", "-n", type=int, default=400, help="Лимит кадров на видео")
     parser.add_argument(
-        "--sample-fps", "-f", type=float, default=1.0,
-        help="FPS для fallback-сэмплера, если PySceneDetect не установлен"
+        "--phash-threshold", "-p", type=int, default=3,
+        help="Порог Хэмминга дедупликации (меньше -> мягче, сохраняем больше кадров)"
     )
+    parser.add_argument("--initial-frames", type=int, default=10, help="Кадров из начальной сцены")
+    parser.add_argument("--initial-seconds", type=float, default=30.0, help="Окно начальной сцены, сек")
+    parser.add_argument("--motion-fps", type=float, default=2.0, help="FPS сэмплинга внутри движения")
+    parser.add_argument("--motion-threshold", type=float, default=0.3, help="Порог MOG2, %% площади")
+    parser.add_argument("--sample-fps", "-f", type=float, default=1.0, help="FPS для режима 'fps'")
     args = parser.parse_args()
 
-    if not _SCENEDETECT_AVAILABLE or not _IMAGEHASH_AVAILABLE:
-        print(
-            "ВНИМАНИЕ: для полного пайплайна установите зависимости:\n"
-            "  pip install scenedetect[opencv] imagehash pandas pyarrow\n"
-            "Сейчас часть функций работает в fallback-режиме.\n"
-        )
+    if not _IMAGEHASH_AVAILABLE:
+        print("ВНИМАНИЕ: imagehash не установлен — дедупликация отключена.")
+    if not _PANDAS_AVAILABLE:
+        print("ВНИМАНИЕ: pandas не установлен — манифест будет в JSONL.")
 
     process(
         input_path=args.input,
         output_dir=args.output,
+        mode=args.mode,
         max_frames=args.max_frames,
         phash_threshold=args.phash_threshold,
+        initial_frames=args.initial_frames,
+        initial_seconds=args.initial_seconds,
+        motion_fps=args.motion_fps,
+        motion_threshold=args.motion_threshold,
         sample_fps=args.sample_fps,
     )
 

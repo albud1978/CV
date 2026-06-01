@@ -7,6 +7,13 @@
 ## [Unreleased]
 
 ### Добавлено
+- **СЛОЙ 1 Ingest — motion-driven нарезка** (`src/pipeline/ingest.py`): переработан под статичные камеры наблюдения. Логика «начальная сцена (initial) + наборы по движению (motion via MOG2)»: переиспользует `MotionDetector`, сэмплирует кадры внутри событий движения с `motion_fps`, мягкий pHash-дедуп. Манифест расширен полями `source`, `event_id`, `motion_score`. Проверено на видео `01` (400 кадров, 13 событий движения, целевой объект — наземный кондиционер ВС — уверенно попадает в выборку).
+- Зависимости пайплайна в `requirements.txt`: `pyarrow`, `scenedetect[opencv]`, `imagehash`.
+
+### Исправлено
+- **Docker mount под Docker Desktop/WSL** (`.env`): bind-mounts `input`/`output` указывали на «голые» Linux-пути, невидимые VM Docker Desktop → `/app/input` был пустым. Исправлено по образцу рабочих проектов: `CV_INPUT_PATH=./input` (транслируется в UNC), `CV_OUTPUT_PATH=/mnt/c/.../Nextcloud/CV/output`. Бэкап старого `.env` сохранён.
+
+### Добавлено (архитектура)
 - **Архитектура CV-конвейера** (`docs/PIPELINE_ARCHITECTURE.md`): финальная 5-слойная архитектура авто-разметки и обучения (Ingest → Auto-Label → Human Review → Version+Train → Eval+Deploy) с гейтами G0/G1/G2, контрактами данных и картой инструментов Roboflow MCP по слоям. Решение по разработке — без мультиагента для MVP.
 - **Контракты данных** (`configs/`): `task.example.yaml`, `ontology.example.yaml`, `augment_conservative.yaml` — шаблоны постановки задачи, онтологии классов и консервативной политики аугментаций (imgsz=1280, close_mosaic=10, mixup/erasing=0).
 - **Правило проекта** (`.cursor/rules/cv-pipeline.mdc`): зафиксированы стандарты обучения, выбора моделей, лицензий и split (70/20/10 stratified by video_id).

@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -38,6 +39,38 @@ from src.pipeline.ingest import (
     save_manifest,
 )
 import cv2
+
+
+def _repair_video(video_path: str, max_sec: float, out_root: str = "data/_repaired") -> str:
+    """Перекодирует видео в чистый mp4, отбрасывая повреждённые пакеты (ffmpeg).
+
+    OpenCV `cap.read()` на битом GOP не возвращает False, а БЛОКИРУЕТСЯ в декодере
+    (зависание навсегда). ffmpeg с `+discardcorrupt`/`ignore_err` дропает такие пакеты
+    и продолжает. Кодируем только до max_sec (+буфер) — нужный кусок.
+
+    Returns:
+        Путь к восстановленному файлу (или исходный, если ffmpeg недоступен/ошибка).
+    """
+    src = Path(video_path)
+    out_dir = Path(out_root)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    dst = out_dir / (src.stem + ".mp4")
+    if dst.exists() and dst.stat().st_size > 0:
+        print(f"  repair: используем готовую копию {dst.name}")
+        return str(dst)
+    dur = int(max_sec + 30)
+    cmd = [
+        "ffmpeg", "-y", "-fflags", "+discardcorrupt", "-err_detect", "ignore_err",
+        "-i", str(src), "-t", str(dur),
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-an",
+        str(dst),
+    ]
+    print(f"  repair: ffmpeg чистит поток (до {dur}c) -> {dst.name} ...")
+    r = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if r.returncode != 0 or not dst.exists() or dst.stat().st_size == 0:
+        print(f"  repair: НЕ удалось ({r.returncode}); используем исходный файл")
+        return video_path
+    return str(dst)
 
 
 def _save_image(path: Path, frame) -> bool:
@@ -85,19 +118,24 @@ def build_video(
     phash_threshold: int,
     motion_fps: float,
     motion_threshold: float,
+    repair: bool = False,
 ) -> list[FrameRecord]:
     """Нарезает один видеофайл: позитивы внутри окон + негативы вне, штампует split."""
     video_id = Path(video_path).stem
     out = Path(output_dir) / split / video_id
     out.mkdir(parents=True, exist_ok=True)
 
-    # Граница анализа движения: конец последнего окна присутствия (+30с буфер).
-    # Это ускоряет MOG2 (не декодим ненужный хвост) и обходит битые GOP за окном.
-    # Открытое окно (end=None) -> ограничиваем стартом+45мин, чтобы не зависнуть на
-    # повреждённых кадрах в самом конце длинных файлов.
-    fps, total = _video_meta(video_path)
+    # Граница анализа: конец последнего окна присутствия (open-ended -> старт+45мин).
     ends = [w[1] if w[1] is not None else (w[0] or 0) + 45 * 60 for w in windows]
-    max_frame = min(total, int((max(ends) + 30) * fps)) if ends else total
+    max_sec = max(ends) if ends else 0
+
+    # При --repair заранее чистим поток через ffmpeg (обход зависаний на битых GOP).
+    if repair:
+        video_path = _repair_video(video_path, max_sec)
+
+    # Граница анализа движения в кадрах: ускоряет MOG2 и не декодит ненужный хвост.
+    fps, total = _video_meta(video_path)
+    max_frame = min(total, int((max_sec + 30) * fps)) if ends else total
 
     # Позитивы: initial + motion, отфильтрованные по окнам присутствия.
     print(f"  [{split}/{video_id}] позитивы (initial+motion, до кадра {max_frame})...")
@@ -172,6 +210,8 @@ def main() -> None:
     ap.add_argument("--only", help="Обработать только видео с этим id (например v06)")
     ap.add_argument("--force", action="store_true",
                     help="Пере-нарезать даже если кадры уже есть (по умолчанию пропускаем готовые)")
+    ap.add_argument("--repair", action="store_true",
+                    help="Чинить битые видео через ffmpeg перед нарезкой (обход зависаний декодера)")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
@@ -208,6 +248,7 @@ def main() -> None:
             phash_threshold=args.phash_threshold,
             motion_fps=args.motion_fps,
             motion_threshold=args.motion_threshold,
+            repair=args.repair,
         )
 
     save_manifest(all_records, args.output)

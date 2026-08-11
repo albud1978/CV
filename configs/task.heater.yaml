@@ -1,0 +1,60 @@
+# Контракт постановки задачи «обогреватель подключён к ВС».
+# Читается человеком и агентом; онтология (промпты, пороги, логика) — отдельно,
+# в configs/ontology.gse_heater.yaml.
+
+goal: >
+  Получать тайм-коды подключения и отключения широкого гофрошланга наземного
+  обогревателя к воздушному судну по записям стационарных камер перрона.
+
+task_type: instance-segmentation      # маски нужны геометрии подключения
+deliverable: >
+  Локальная модель YOLO11-seg (.pt + ONNX/NCNN/TFLite) и события в JSON
+  ({hose_connected, hose_disconnected} с тайм-кодами и уверенностью).
+
+input:
+  videos_config: "configs/dataset_split.yaml"   # 9 видео, split по видео
+  frames_root: "data/dataset_heater"            # 831 кадр: train 566 / val 85 / test 180
+
+classes: [unit, wide_hose, cable, aircraft, staff, passenger]
+
+# Цель деплоя: edge — модель работает локально, в идеале на телефоне.
+deployment_target: edge
+
+acceptance_metrics:
+  # Инженерные (диагностика)
+  map50_min: 0.75
+  map50_target: 0.90
+  # Продуктовые — то, что показываем заказчику
+  temporal_iou_min: 0.85
+  event_onset_tolerance_sec: 120
+  max_false_events_per_video: 1
+
+constraints:
+  licenses_allowed: ["Apache-2.0", "MIT", "BSD-3"]
+  license_debt:
+    - "Ultralytics YOLO — AGPL-3.0: для распространяемого продукта нужна коммерческая
+       лицензия либо замена студента на RF-DETR (Apache-2.0)."
+    - "SAM 3 (учитель) — Meta SAM License: проверить field-of-use до прода.
+       Учитель в продукт не встраивается — только в конвейер разметки."
+  send_data_to_cloud: false          # учитель локальный; облако — только ревью/версии
+  training_on_external_gpu: true     # разовое обучение на внешних ресурсах допустимо
+
+teacher:
+  backend: local                     # local | stub
+  model: sam3
+  note: >
+    Roboflow дедуплицирует кадры по контенту на весь воркспейс и перезаписывает
+    аннотации при повторном auto-label — многопроходная схема в облаке ломается.
+    Облако используем для ревью, версий и хостового обучения.
+
+student:
+  primary: yolo11s-seg
+  edge: yolo11n-seg
+  fallback_license_clean: rf-detr-m  # если нужна Apache-2.0 в продукте
+
+human_in_the_loop:
+  golden_set_frames: 200             # единственная обязательная ручная работа (гейт G1)
+  review_policy: >
+    Сплошное ревью не делаем. Человек смотрит сводку причин отбраковки
+    (rejections.jsonl), выборку QA-картинок и очередь расхождений
+    «учитель vs обученный студент» на втором круге.

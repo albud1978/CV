@@ -76,7 +76,7 @@ class Ontology:
         with p.open("r", encoding="utf-8") as f:
             return cls(yaml.safe_load(f) or {}, source=str(p))
 
-    # --- доступ к секциям ---
+    # --- доступ к секциям онтологии (сырые словари YAML, пустой при отсутствии) ---
 
     @property
     def autoqa(self) -> dict[str, Any]:
@@ -108,6 +108,7 @@ class Ontology:
 
     @property
     def reference_width(self) -> float:
+        """Ширина кадра, для которой откалиброваны все пороги в пикселях."""
         return float(self.autoqa.get("reference_width", 1280))
 
     @property
@@ -134,6 +135,7 @@ class Ontology:
         return {c.label for c in self.classes if c.stationary}
 
     def confidence_of(self, label: str, default: float = 0.25) -> float:
+        """Минимальная уверенность, ниже которой инстанс класса отбраковывается."""
         for c in self.classes:
             if c.label == label:
                 return c.confidence

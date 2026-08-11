@@ -6,11 +6,37 @@
 
 Стек технологий: **PyTorch**, **YOLOv8/v11** (Ultralytics), **YOLO-World** (zero-shot), **SAM 2** (Meta), **RF-DETR** (Roboflow), **Molmo2-4B** (VLM).
 
+## Быстрый старт: конвейер «слова → модель → тайм-коды»
+
+Рабочая задача проекта — детекция наземного обогревателя ВС и **факта подключения**
+его широкого гофрошланга к самолёту. Весь путь от текстового описания объектов до
+локальной YOLO и событий в JSON собран в один конвейер:
+
+```bash
+# полный прогон: авто-разметка -> датасет -> обучение
+./scripts/reboot_heater.sh
+
+# сухой прогон без весов и GPU (проверить конвейер целиком)
+BACKEND=stub SKIP_TRAIN=1 ./scripts/reboot_heater.sh
+
+# события по видео и приёмка по тайм-кодам
+python -m src.pipeline.run_video --weights runs/heater_v1/train/weights/best.pt \
+    --video "input/.../01_....mkv" --out data/events/v01 --fps 1 --save-video
+python -m src.pipeline.eval_events --events data/events
+```
+
+Единственный файл, который правится под новую задачу, — `configs/ontology.*.yaml`
+(классы, промпты учителя, пороги отбраковки, логика связи, автомат событий).
+
+Подробности, решения и гейты приёмки: **[docs/REBOOT_PLAN.md](docs/REBOOT_PLAN.md)**.
+Тесты логики (28 шт., без данных и GPU): `python3 -m tests.test_pipeline`.
+
 ## Архитектура
 Целевая архитектура проекта (Target Architecture) описана в документе:
 [Эталонная Архитектура Мультимодальной AI-системы](docs/REFERENCE_ARCHITECTURE.md).
 
 Она включает в себя связку RF-DETR, SAM 2, SigLIP и других SOTA-компонентов.
+Конвейер подготовки данных и обучения — [docs/PIPELINE_ARCHITECTURE.md](docs/PIPELINE_ARCHITECTURE.md).
 
 ## Структура проекта
 

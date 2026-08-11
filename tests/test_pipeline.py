@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.pipeline import autoqa, events, geometry as g, link, relation  # noqa: E402
+from src.pipeline import autoqa, eval_events, events, geometry as g, link, relation  # noqa: E402
 from src.pipeline.ontology import Ontology  # noqa: E402
 
 W, H = 1280, 720
@@ -272,6 +272,56 @@ def test_report_shape():
     rep = events.report(evs, eps, video_id="v01")
     assert rep["video_id"] == "v01" and rep["connected_seconds"] > 1500
     assert rep["events"][0]["timecode"].count(":") == 2
+
+
+# --------------------------------------------------------------------------- eval_events
+
+
+def test_normalize_windows_open_end():
+    assert eval_events.normalize_windows([[300, None]], 3600) == [(300.0, 3600.0)]
+    assert eval_events.normalize_windows([[0, 2580]], 4200) == [(0.0, 2580.0)]
+
+
+def test_temporal_iou():
+    assert eval_events.temporal_iou([(0, 100)], [(0, 100)]) == 1.0
+    assert eval_events.temporal_iou([(0, 100)], [(50, 150)]) == 0.3333
+    assert eval_events.temporal_iou([(0, 100)], [(200, 300)]) == 0.0
+
+
+def test_boundaries_ignore_recording_edges():
+    """Окно от 0 до конца записи не содержит наблюдаемых переходов."""
+    assert eval_events.boundaries([(0.0, 3600.0)], 3600.0) == []
+    assert eval_events.boundaries([(600.0, 2400.0)], 3600.0) == [
+        ("hose_connected", 600.0), ("hose_disconnected", 2400.0)
+    ]
+
+
+def test_evaluate_video_pass_and_fail():
+    report = {
+        "video_id": "v01",
+        "duration_sec": 3600,
+        "episodes": [{"start": 620, "end": 2380}],
+        "events": [
+            {"name": "hose_connected", "timestamp": 620},
+            {"name": "hose_disconnected", "timestamp": 2380},
+        ],
+    }
+    res = eval_events.evaluate_video(report, [[600, 2400]], ONTO)
+    assert res["passed"] and res["temporal_iou"] > 0.95
+    assert all(m["within_tolerance"] for m in res["matched"])
+
+    noisy = dict(report, events=report["events"] + [
+        {"name": "hose_connected", "timestamp": 3000},
+        {"name": "hose_disconnected", "timestamp": 3100},
+    ])
+    res_noisy = eval_events.evaluate_video(noisy, [[600, 2400]], ONTO)
+    assert not res_noisy["passed"] and len(res_noisy["false_events"]) == 2
+
+
+def test_evaluate_video_missed_event():
+    report = {"video_id": "v10", "duration_sec": 3200, "episodes": [], "events": []}
+    res = eval_events.evaluate_video(report, [[300, 2000]], ONTO)
+    assert not res["passed"] and len(res["missed"]) == 2 and res["temporal_iou"] == 0.0
 
 
 # --------------------------------------------------------------------------- runner

@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 from pathlib import Path
 
@@ -84,6 +85,16 @@ def _save_image(path: Path, frame) -> bool:
         return False
     path.write_bytes(buf.tobytes())
     return path.exists() and path.stat().st_size > 0
+
+
+def _frame_idx_from_name(name: str) -> int:
+    """Извлекает индекс кадра из имени вида ``<video>_<source>_f00012345.jpg``.
+
+    Нужно для «резюме»: кадры уже на диске, а исходные метаданные потеряны —
+    индекс в имени остаётся единственным источником времени кадра.
+    """
+    m = re.search(r"_f(\d+)\.jpg$", name)
+    return int(m.group(1)) if m else 0
 
 
 def _in_windows(ts: float, windows: list[list]) -> bool:
@@ -231,9 +242,17 @@ def main() -> None:
         existing = list(out_dir.glob("*.jpg")) if out_dir.exists() else []
         if existing and not args.force:
             print(f"\n=== {v['id']} [{v['split']}] УЖЕ ГОТОВ ({len(existing)} кадров) — пропуск ===")
+            # Восстанавливаем frame_idx из имени файла и время по fps видео: без
+            # временных меток манифест бесполезен для событийной логики (events.py).
+            try:
+                fps, _ = _video_meta(str(vp))
+            except Exception:
+                fps = 25.0
             all_records += [FrameRecord(
                 video_id=out_dir.name, source=("negative" if "negative" in p.name else "motion"),
-                event_id=-1, motion_score=0.0, frame_idx=0, timestamp=0.0,
+                event_id=-1, motion_score=0.0,
+                frame_idx=_frame_idx_from_name(p.name),
+                timestamp=_frame_idx_from_name(p.name) / max(fps, 1e-6),
                 phash=None, image_path=str(p), split=v["split"],
             ) for p in existing]
             continue
